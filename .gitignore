@@ -1,0 +1,31 @@
+# Privacy & secrets
+.env
+license.dat
+gamecore/gamecore/core_assets/license.dat
+
+# Game engine binaries (proprietary)
+gamecore/
+
+# Course materials
+课件/
+课件_all_text.txt
+
+# Temp files
+tmp/
+gamecore/gamecore/simulator_output/
+gamecore/gamecore/scene/*.abs
+__pycache__/
+*.pyc
+*.pyo
+
+# Agent instruction files (not for distribution)
+AGENTS.md
+
+# Archives
+*.zip
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
