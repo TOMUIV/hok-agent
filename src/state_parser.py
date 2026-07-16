@@ -2,9 +2,125 @@ import math
 from hero_db import hero_name
 
 BUTTON_NAMES = ["None1","None2","Move","Attack","Skill1","Skill2","Skill3","HealSkill","ChosenSkill","Recall","Skill4","EquipSkill"]
+BTN_SKILL_MAP = {"Skill1": 4, "Skill2": 5, "Skill3": 6}
+BTN_REVERSE = {4: "Skill1", 5: "Skill2", 6: "Skill3", 3: "Attack", 2: "Move", 9: "Recall"}
 
 def dist(x1, y1, x2, y2):
     return math.sqrt((x2-x1)**2 + (y2-y1)**2)
+
+def get_skill_cd(h, slot):
+    sk_list = getattr(h, "skill", [])
+    if slot < len(sk_list):
+        return getattr(sk_list[slot], "cooldown", 0), getattr(sk_list[slot], "cooldown_max", 0)
+    return 0, 0
+
+_SUB_FUNCS = {
+    "FARM": [
+        ("last_hit", "last-hit nearest minion"),
+        ("move_to_lane", "move toward lane center"),
+        ("retreat_to_tower", "walk back under tower"),
+    ],
+    "POKE": [
+        ("aim_skill", "cast poke skill at enemy"),
+        ("basic_attack", "basic attack enemy"),
+        ("reposition_back", "step back to safe distance"),
+    ],
+    "ALL_IN": [
+        ("combo_start", "execute skill combo rotation"),
+        ("basic_attack", "basic attack enemy"),
+        ("chase", "move toward enemy"),
+    ],
+}
+
+def get_legal_macro_actions(self_h, enemy_h, legal_action, self_hero_id):
+    if not self_h or not enemy_h:
+        return ["  (no heroes)"]
+    available = []
+    blocked = []
+    d_enemy = dist(self_h.location.x, self_h.location.y, enemy_h.location.x, enemy_h.location.y)
+    hp_pct = self_h.hp / max(self_h.max_hp, 1)
+    atk_range = getattr(self_h, "atk_range", 700)
+
+    from hero_skills import HERO_SKILL_CONFIG
+    cfg = HERO_SKILL_CONFIG.get(self_hero_id, {})
+    skill_ranges = cfg.get("skill_ranges", {})
+
+    for skill_name, sub_funcs in _SUB_FUNCS.items():
+        for func_name, desc in sub_funcs:
+            reason = None
+            ok = True
+
+            if skill_name == "FARM":
+                if func_name == "last_hit":
+                    if legal_action and len(legal_action) >= 12 and legal_action[3] != 1:
+                        ok = False; reason = "Attack not available"
+                elif func_name in ("retreat_to_tower", "move_to_lane"):
+                    pass
+
+            elif skill_name == "POKE":
+                if func_name == "aim_skill":
+                    pk = cfg.get("poke_skill", 1)
+                    btn = {1: 4, 2: 5, 3: 6}[pk]
+                    sr = skill_ranges.get(pk, 700)
+                    if legal_action and len(legal_action) >= 12 and legal_action[btn] != 1:
+                        btn_name = BTN_REVERSE.get(btn, f"btn{btn}")
+                        ok = False; reason = f"Skill{pk}({btn_name}) not available"
+                    elif d_enemy > sr:
+                        ok = False; reason = f"enemy out of range ({d_enemy:.0f})"
+                    else:
+                        cd, _ = get_skill_cd(self_h, pk - 1)
+                        if cd > 0:
+                            ok = False; reason = f"Skill{pk} on cooldown ({cd/1000:.1f}s)"
+                elif func_name == "basic_attack":
+                    if legal_action and len(legal_action) >= 12 and legal_action[3] != 1:
+                        ok = False; reason = "Attack not available"
+                    elif d_enemy > atk_range:
+                        ok = False; reason = f"enemy out of range ({d_enemy:.0f})"
+                elif func_name == "reposition_back":
+                    pass
+
+            elif skill_name == "ALL_IN":
+                if func_name == "combo_start":
+                    prio = cfg.get("combo_priority", [3, 2, 1])
+                    any_ok = False
+                    for sn in prio:
+                        btn = {1: 4, 2: 5, 3: 6}[sn]
+                        sr = skill_ranges.get(sn, 700)
+                        if legal_action and legal_action[btn] == 1 and d_enemy < sr:
+                            cd, _ = get_skill_cd(self_h, sn - 1)
+                            if cd == 0:
+                                any_ok = True
+                                break
+                    if not any_ok:
+                        ok = False; reason = "no combo skill in range or off cooldown"
+                    if hp_pct < 0.3:
+                        ok = False; reason = f"HP too low ({hp_pct*100:.0f}%)"
+                elif func_name == "basic_attack":
+                    if legal_action and len(legal_action) >= 12 and legal_action[3] != 1:
+                        ok = False; reason = "Attack not available"
+                    elif d_enemy > atk_range:
+                        ok = False; reason = f"enemy out of range ({d_enemy:.0f})"
+                elif func_name == "chase":
+                    if d_enemy > atk_range * 3:
+                        ok = False; reason = f"enemy too far ({d_enemy:.0f})"
+
+            label = f"{skill_name}.{func_name}()"
+            if ok:
+                available.append(label)
+            else:
+                blocked.append(f"  {label}: {reason}")
+
+    lines = []
+    if available:
+        lines.append("  AVAILABLE:")
+        for a in available:
+            lines.append(f"    {a}")
+    if blocked:
+        lines.append("  BLOCKED:")
+        lines.extend(blocked)
+    if not available and not blocked:
+        lines.append("  (none)")
+    return lines
 
 def parse_state(info, self_hero_id=None):
     s = info if isinstance(info, dict) else info[0]
@@ -84,6 +200,13 @@ def parse_state(info, self_hero_id=None):
         lines.append(f"  ATK:{pa}/{ma} DEF:{pd}/{md} Range:{ar} Spd:{ms}")
         lines.append(f"  Pos:{pos_str} Behav:{bm}")
         lines.append(f"  Skill CD: S1({s1cd/1000:.1f}s/{s1mcd/1000:.1f}s) S2({s2cd/1000:.1f}s/{s2mcd/1000:.1f}s) S3({s3cd/1000:.1f}s/{s3mcd/1000:.1f}s)")
+        eq_list = getattr(self_h, 'equipment', []) or []
+        eq_parts = []
+        for eq in eq_list:
+            eq_id = getattr(eq, 'config_id', 0)
+            if eq_id:
+                eq_parts.append(gamecore_data.get_equip_name(eq_id))
+        lines.append(f"  Items: {', '.join(eq_parts) if eq_parts else '(none)'}")
 
     if enemy_h:
         cid = getattr(enemy_h, 'config_id', 0)
@@ -160,13 +283,13 @@ def parse_state(info, self_hero_id=None):
         lines.append("  none")
 
     lines.append("")
-    lines.append("--- LEGAL ACTIONS ---")
+    lines.append("--- MACRO ACTIONS ---")
     la = s.get("legal_action", [])
-    if len(la) >= 12:
-        available = [BUTTON_NAMES[i] for i in range(12) if la[i] == 1]
-        lines.append(f"  {', '.join(available)}")
+    macro_lines = get_legal_macro_actions(self_h, enemy_h, la, self_hero_id)
+    if macro_lines:
+        lines.extend(macro_lines)
     else:
-        lines.append("  none")
+        lines.append("  (none available)")
 
     lines.append("")
     lines.append("--- DISTANCES ---")

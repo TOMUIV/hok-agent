@@ -1,155 +1,19 @@
 import re, os, json, time, collections
 from openai import OpenAI
-from state_parser import parse_state, compress_state
+from state_parser import parse_state
 from strategy_executor import ProtocolExecutor
 from skill_db import get_matchup
 from skill_base import SKILL_REGISTRY
 
+from memory import MemorySystem
+from prompts import PROMPT_BASE, PROMPT_SYS1_PROTOCOL, EXPERIENCE_WARNING
+import gamecore_data as gc
 from trajectory import TRAJECTORY_DIR
 traj_file = None
 traj_path = os.path.join(TRAJECTORY_DIR, f"trajectory_{int(time.time())}.jsonl")
 
-SYSTEM_PROMPT = """You control {self_name}({self_type}) vs {enemy_name}({enemy_type}) in Honor of Kings 1v1.
-
-=== GAME RULES ===
---- GAME MODE ---
-Scene: 1V1.abs. Mode: 1v1. game_type=1.
-Two camps: CampID:0 (you, self=BLUE) vs CampID:1 (enemy, RED).
-Your hero config_id={self_hero_id}. Enemy config_id={enemy_hero_id}.
-Per-frame protobuf includes: frame_no, gameover, hero_list, organ_list, soldier_list, monster_list, legal_action.
-Observed max frames: ~3200 frames/game. Each frame ~60 game ms.
-Hero roles: tank, soldier, assassin, wizard, shooter, suport.
-Hero has 3 skill slots (SKILL_SLOT_NUM=3). Summoner skill at slot 5 (MASTER_SKILL_IDX=5).
-Skill max levels: skill1/skill2 [0,6], skill3/ultimate [0,3]. Cooldowns [0,80000] (game ticks).
-
---- MAP CONFIG ---
-Total map length: 113000 units. Center at (0, 0, 0). Ground Y=48.
-AI feature coordinate ranges:
-  soldier/organ location_x: [-40000, 40000]    location_z: [-40000, 40000]
-  monster location: [-60000, 60000]
-  max distance any two entities: 113000
-  soldier HP: [0, 12000]    soldier ATK: [0, 700]
-  organ HP: [0, 9000]       organ ATK: [0, 630]
-  organ attack range: [0, 13000]  organ kill income: [0, 150]
-  monster HP: [0, 20000]    monster ATK: [0, 800]   monster kill income: [0, 105]
-Map sub-regions:
-  local_15_1:  view_distance=15000 (hero local FOW view)
-  whole_10:    view_distance=56500 (full overview)
-  mini_map:    view_distance=56500
-  strategy_map: view_distance=56500
-Map boundary reference points (Y=48 for all):
-  center1: (-9154, -19950)  center2: (-9235, -20031)
-  boundary_up: (-15530, -4727)   boundary_down: (-10971, -21767)
-AI config bounds: SIDE_X=37000, SIDE_Z=37000, CORNER_X=30000, CORNER_Z=30000.
-
---- HERO STAT RANGES ---
-  Level: [0, 15]       HP: [0, 20000]       EP: [0, 10000]
-  Phy Atk: [130, 2750]  Phy Def: [0, 1360]
-  Mgc Atk: [0, 3940]   Mgc Def: [0, 2335]
-  Atk Range: [0, 8000]  Money: [300, 16700]
-  K/D/A max: 70 / 40 / 75
-  Skill1/Skill2 max level: 6. Skill3 (ultimate) max level: 3.
-  Cooldown range: [0, 80000] (game ticks).
-
---- STRUCTURES (organ_list) ---
-Each side has 3 structures (SubType: 21=outer tower, 23=inner tower, 24=crystal):
-  BLUE Crystal:   ConfigID=106  HP=7000  pos=(-19780, -19780)
-  RED Crystal:    ConfigID=107  HP=7000  pos=(19820, 19820)
-  BLUE Inner Twr: ConfigID=42   HP=6000  pos=(-37427, -38120)
-  RED Inner Twr:  ConfigID=43   HP=6000  pos=(37901, 37844)
-  BLUE Outer Twr: ConfigID=1    HP=5000  pos=(-11240, -11228)
-  RED Outer Twr:  ConfigID=2    HP=5000  pos=(11285, 11275)
-TOWER_ATK_RANGE=70, CRYSTAL_ATK_RANGE=100, HERO_VISUAL_FIELD=100.
-Tower protection range (under tower safe zone): ~900. Safe distance from enemy tower: ~15000.
-Enemy considered "near" when within ~180. Friend considered "near" when within ~150.
-
---- SOLDIERS ---
-Types: normal_soldier, cannon_soldier, super_soldier, dragon_soldier.
-Stat ranges: HP [0,12000], ATK [0,700].
-
---- MONSTERS ---
-Types: red_buff, blue_buff, red_bird, bear, cheetah, lizard, river_lizard, baron, zhuzai, black_baron.
-Stat ranges: HP [0,20000], ATK [0,800], kill_income [0,105].
-Notable IDs: BLUE_BUFF=6010, RED_BUFF=6011, ZHUZHAI=6009, BAOJUN=6012, DARK_BAOJUN=6022.
-
---- KEY TIMING ---
-  TARGET_BORN_FRAME=460     (first minion wave spawns ~frame 460)
-  START_PUSH_FRAME=2700     (AI begins pushing)
-  START_FOLLOW_FRAME=7200
-  MAX_RETURN_CITY_HP=0.9   (recall at 90% HP)
-  MAX_RETURN_CITY_EP=0.9   (recall at 90% EP)
-
---- SPRING ---
-  BLUE spring: pos=(-50000,-50000)  RED spring: pos=(50000,50000)
-  SPRING_RECOVER_RANGE=10.  FRIEND_TOWER_SAFE_DIST=1300.
-
---- HERO INFO ---
-{hero_info}
-
-=== MACRO SKILLS (read docs, then call sub_functions) ===
-{skilldoc}
-
-=== PROTOCOL (each frame output) ===
-You have the full game state above. Analyze and decide.
-
-RULES:
-- ENEMY may be OUT OF VISION (camp_visible=false). Their HP shows as FOW and position is fake (e.g. 100000,100000).
-- When FOW, DO NOT trust enemy position for distance calculation — it is a placeholder, not actual location.
-- All your movement and actions MUST go through @SKILL_CALL. Never use raw Move/Attack/Skill buttons.
-- You can call MULTIPLE sub-functions in a single <action> block. They execute in order.
-- Each skill sub-function handles movement, positioning, and cooldowns automatically.
-- If you want to change macro behavior, call a different skill's sub-function.
-- All distance values (Range, Pos, tower coordinates) use the same game units. Compare them directly.
-
-First output <think> </think>:
-  - Situation: hero stats, tower status, minion wave, positioning, FOW state
-  - WhatIf: evaluate 2 candidate actions, predict outcomes
-  - Decision: which skill(s) to call and why
-
-Then output <action> </action>:
-  One or more @SKILL_CALL lines, executed in order.
-
-=== FEW-SHOT EXAMPLES ===
-
-Example 1 — Safe farming, enemy FOW (position is fake):
-  <think>
-  Situation: SELF full HP at blue outer tower, minions at lane center, enemy shows FOW at (100000,100000). This position is NOT real — enemy location unknown.
-  WhatIf 1: FARM.last_hit → safe gold while maintaining position.
-  WhatIf 2: POKE.aim_skill → no enemy vision, wasted CD.
-  Decision: FARM.last_hit to secure farm while keeping safe distance.
-  </think>
-  <action>
-  @SKILL_CALL FARM.last_hit()
-  </action>
-
-Example 2 — Enemy visible, HP advantage, chaining two skills:
-  <think>
-  Situation: SELF 90% HP vs enemy 60% HP at lane center, both visible. Poke skill off CD.
-  WhatIf 1: POKE.aim_skill → chip damage, then ALL_IN.basic_attack to pressure.
-  WhatIf 2: FARM.last_hit → safe but wastes kill window.
-  Decision: Chain POKE into ALL_IN to capitalize on HP advantage.
-  </think>
-  <action>
-  @SKILL_CALL POKE.aim_skill()
-  @SKILL_CALL ALL_IN.basic_attack()
-  </action>
-
-Example 3 — Repositioning under tower:
-  <think>
-  Situation: SELF low HP (30%), enemy pushing wave to my tower. Need to recall.
-  WhatIf 1: FARM.retreat_to_tower → safe recall under tower.
-  WhatIf 2: ALL_IN.chase → suicide, enemy has full HP.
-  Decision: Retreat to tower, then recall.
-  </think>
-  <action>
-  @SKILL_CALL FARM.retreat_to_tower()
-  </action>
-
-All macro skill docs are listed above. Call them directly — no need to open docs first.
-DO NOT use @TOOL or raw buttons. @SKILL_CALL only."""
-
 class MacroAgent:
-    def __init__(self, name, self_hero_id, enemy_hero_id, api_key=None, base_url=None, model=None):
+    def __init__(self, name, self_hero_id, enemy_hero_id, api_key=None, base_url=None, model=None, memory_system=None):
         self.name = name
         self.self_hero_id = self_hero_id
         self.enemy_hero_id = enemy_hero_id
@@ -166,8 +30,10 @@ class MacroAgent:
         self._prev_frame = None
         self._prev_pb = None
         self._prev_pb_10 = None
+        self._prev_data = None
         self.state_changes_str = ""
         self._call_count = 0
+        self.memory = memory_system
         global traj_file, traj_path
         if not traj_file:
             traj_file = open(traj_path, "w", encoding="utf-8")
@@ -211,13 +77,222 @@ class MacroAgent:
             skilldoc_lines.append(doc)
         skilldoc = "\n\n".join(skilldoc_lines)
 
-        self.system_prompt = SYSTEM_PROMPT.format(
+        if self.memory:
+            exp = self.memory.retrieve(self_hero_id, enemy_hero_id)
+            exp = exp if exp else "(no prior experience for this matchup)"
+            exp += "\n\n" + EXPERIENCE_WARNING
+        else:
+            exp = "(memory system disabled)\n\n" + EXPERIENCE_WARNING
+
+        self.system_prompt = PROMPT_BASE.format(
             self_name=self_name, enemy_name=enemy_name,
             self_type=self_type, enemy_type=enemy_type,
             self_hero_id=self_hero_id, enemy_hero_id=enemy_hero_id,
             skilldoc=skilldoc,
             hero_info=hero_info,
-        )
+            experience=exp,
+        ) + PROMPT_SYS1_PROTOCOL
+
+    def on_game_end(self, outcome):
+        global traj_file, traj_path
+        if traj_file:
+            traj_file.close()
+            traj_file = None
+        if self.memory:
+            frame_count = 0
+            if self.history:
+                last = self.history[-1]
+                frame_count = last.get("frame", 0)
+            self.memory.reflect(
+                self.self_hero_id, self.enemy_hero_id,
+                outcome, frame_count,
+                traj_path, self.client,
+            )
+
+    def _get_hero_data(self, pb, cid):
+        for h in getattr(pb, 'hero_list', []):
+            if getattr(h, 'config_id', 0) == cid:
+                loc = getattr(h, 'location', None)
+                px = loc.x if loc and hasattr(loc, 'x') else None
+                py = loc.y if loc and hasattr(loc, 'y') else None
+                equip_list = getattr(h, 'equipment', None) or []
+                eq_names = []
+                for eq in equip_list:
+                    eq_id = getattr(eq, 'config_id', 0)
+                    if eq_id:
+                        eq_names.append(gc.get_equip_name(eq_id))
+                return {
+                    "hp": getattr(h, 'hp', 0), "max_hp": getattr(h, 'max_hp', 1),
+                    "gold": getattr(h, 'money', 0), "level": getattr(h, 'level', 1),
+                    "pos": (px, py) if px is not None else None,
+                    "item": ", ".join(eq_names) if eq_names else "(none)",
+                }
+        return None
+
+    def _parse_prediction(self, think_text):
+        if not think_text:
+            return ""
+        for line in think_text.split("\n"):
+            line = line.strip()
+            if "WhatIf" in line and "→" in line:
+                return line
+        return ""
+
+    def _extract_think_segments(self, think_text):
+        segs = {"review": "", "check": "", "situation": "", "whatif_1": "", "whatif_2": "", "decision": ""}
+        if not think_text:
+            return segs
+        for line in think_text.split("\n"):
+            line = line.strip()
+            if line.startswith("- Review:") or line.startswith("Review:"):
+                segs["review"] = line.split(":", 1)[1].strip() if ":" in line else line
+            elif line.startswith("- WhatIf check:") or line.startswith("WhatIf check:"):
+                segs["check"] = line.split(":", 1)[1].strip() if ":" in line else line
+            elif line.startswith("- Situation:") or line.startswith("Situation:"):
+                segs["situation"] = line.split(":", 1)[1].strip() if ":" in line else line
+            elif line.startswith("- WhatIf 1:") or line.startswith("WhatIf 1:"):
+                segs["whatif_1"] = line.split(":", 1)[1].strip() if ":" in line else line
+            elif line.startswith("- WhatIf 2:") or line.startswith("WhatIf 2:"):
+                segs["whatif_2"] = line.split(":", 1)[1].strip() if ":" in line else line
+            elif line.startswith("- Decision:") or line.startswith("Decision:"):
+                segs["decision"] = line.split(":", 1)[1].strip() if ":" in line else line
+        return segs
+
+    def _build_memory_text(self, pb_curr):
+        if not self.history:
+            return "(game start, no prior calls)"
+
+        if self._prev_pb and pb_curr:
+            for cid in [self.self_hero_id, self.enemy_hero_id]:
+                cur = self._get_hero_data(pb_curr, cid)
+                prev = self._get_hero_data(self._prev_pb, cid)
+                if cur and prev:
+                    hp_change = cur["hp"] - prev["hp"]
+                    gold_change = cur["gold"] - prev["gold"]
+                    if self.history:
+                        last = self.history[-1]
+                        if hp_change != 0 or gold_change != 0:
+                            parts = []
+                            if hp_change < 0:
+                                parts.append(f"dmg_taken:{-hp_change}")
+                            elif hp_change > 0:
+                                parts.append(f"healed:{hp_change}")
+                            if gold_change > 0:
+                                parts.append(f"gold:+{gold_change}")
+                            last["actual"] = ", ".join(parts) if parts else "no_change"
+
+        sections = []
+        entries = list(self.history)
+        pos_self, pos_enemy = [], []
+        gold_self_start = gold_self_end = gold_enemy_start = gold_enemy_end = 0
+        tower_hp_start = tower_hp_end = {}
+        kills = deaths = 0
+        skill_count = {}
+        prev_hp = {}
+
+        for idx, e in enumerate(entries):
+            d = e.get("data", {})
+            if d.get("self_pos"): pos_self.append(d["self_pos"])
+            if d.get("enemy_pos"): pos_enemy.append(d["enemy_pos"])
+            gs = d.get("self_gold", 0); ge = d.get("enemy_gold", 0)
+            if idx == 0: gold_self_start = gs; gold_enemy_start = ge
+            gold_self_end = gs; gold_enemy_end = ge
+
+            hp_s = d.get("self_hp", 0); hp_e = d.get("enemy_hp", 0)
+            if prev_hp:
+                if prev_hp.get("self", 0) > 0 and hp_s == 0: deaths += 1
+                if prev_hp.get("enemy", 0) > 0 and hp_e == 0: kills += 1
+            prev_hp = {"self": hp_s, "enemy": hp_e}
+
+            act = e.get("action_name", "")
+            if act:
+                sk = act.split(".")[0] if "." in act else act
+                skill_count[sk] = skill_count.get(sk, 0) + 1
+
+            thp = e.get("tower_hp", {})
+            if idx == 0: tower_hp_start = dict(thp)
+            tower_hp_end = dict(thp)
+
+        # TRENDS
+        last_self_item = entries[-1].get("data", {}).get("self_item", "(none)") if entries else "(none)"
+        last_enemy_item = entries[-1].get("data", {}).get("enemy_item", "(none)") if entries else "(none)"
+
+        def _side_block(tag, pos_list, g_start, g_end, k, d, sk_count, item_str):
+            lines = [f"--- {tag} ---"]
+            if pos_list:
+                lines.append("  PATH: " + " -> ".join([f"({x:.0f},{y:.0f})" for x, y in pos_list]))
+            lines.append(f"  GOLD: {g_start} -> {g_end} (+{g_end-g_start})")
+            lines.append(f"  ITEMS: {item_str}")
+            lines.append(f"  KDA: {k}/{d}")
+            if sk_count:
+                lines.append("  SKILL: " + " | ".join([f"{sk}:{c}" for sk, c in sorted(sk_count.items())]))
+            return "\n".join(lines)
+
+        tower_parts = []
+        for label in ["RED outer", "RED crystal", "BLUE outer", "BLUE crystal"]:
+            s = tower_hp_start.get(label); e = tower_hp_end.get(label)
+            if s is not None and e is not None and s != e:
+                tower_parts.append(f"{label} {s:.0f}->{e:.0f}({e-s:+.0f})")
+
+        trend_self = _side_block("SELF", pos_self, gold_self_start, gold_self_end, kills, deaths, skill_count, last_self_item)
+        enemy_skill = {}
+        trend_enemy = _side_block("ENEMY", pos_enemy, gold_enemy_start, gold_enemy_end, deaths, kills, enemy_skill, last_enemy_item)
+        trend_text = trend_self + "\n\n" + trend_enemy
+        if tower_parts:
+            trend_text += "\n\nTOWER: " + " | ".join(tower_parts)
+        sections.append("=== TRENDS (last {} frames) ===".format(len(entries)) + "\n" + trend_text)
+
+        # DETAIL (all frames)
+        detail_lines = []
+        for e in entries:
+            d = e.get("data", {})
+            act_name = e.get("action_name", "none")
+            raw = e.get("raw", "")
+            actual = e.get("actual", "")
+            segs = self._extract_think_segments(raw)
+            sp = d.get("self_pos"); ep = d.get("enemy_pos")
+            sh = d.get("self_hp", 0); smh = d.get("self_max_hp", 1)
+            sg = d.get("self_gold", 0); eh = d.get("enemy_hp", 0)
+            emh = d.get("enemy_max_hp", 1); eg = d.get("enemy_gold", 0)
+            si = d.get("self_item", "(none)")
+            ei = d.get("enemy_item", "(none)")
+
+            detail_lines.append(f"[Frame {e['frame']}] {act_name}")
+            if segs["review"]: detail_lines.append(f"  Review: {segs['review']}")
+            if segs["check"]: detail_lines.append(f"  WhatIf check: {segs['check']}")
+            if segs["situation"]: detail_lines.append(f"  Situation: {segs['situation']}")
+            if segs["whatif_1"]: detail_lines.append(f"  WhatIf 1: {segs['whatif_1']}")
+            if segs["whatif_2"]: detail_lines.append(f"  WhatIf 2: {segs['whatif_2']}")
+            if segs["decision"]: detail_lines.append(f"  Decision: {segs['decision']}")
+            detail_lines.append(f"  Action: {act_name}")
+
+            # DELTA block
+            hp_sd = d.get("delta_self_hp", ""); hp_ed = d.get("delta_enemy_hp", "")
+            gd_s = d.get("delta_self_gold", ""); gd_e = d.get("delta_enemy_gold", "")
+            td = d.get("delta_tower", ""); md = d.get("delta_minions", "")
+            if hp_sd or hp_ed or gd_s or td:
+                delta = ["  === DELTA ==="]
+                s_d = []; e_d = []
+                if hp_sd: s_d.append(f"HP: {hp_sd}")
+                if gd_s: s_d.append(f"GOLD: {gd_s}")
+                if md: s_d.append(f"MINIONS: {md}")
+                s_d.append(f"ITEMS: {si}")
+                if hp_ed: e_d.append(f"HP: {hp_ed}")
+                if gd_e: e_d.append(f"GOLD: {gd_e}")
+                e_d.append(f"ITEMS: {ei}")
+                if td: s_d.append(f"TOWER: {td}")
+                if s_d: delta.append("  --- SELF ---\n    " + "\n    ".join(s_d))
+                if e_d: delta.append("  --- ENEMY ---\n    " + "\n    ".join(e_d))
+                detail_lines.extend(delta)
+
+            sp_str = f"({sp[0]:.0f},{sp[1]:.0f})" if sp else "(?,?)"
+            ep_str = f"({ep[0]:.0f},{ep[1]:.0f})" if ep else "(?,?)"
+            detail_lines.append(f"  SELF: @{sp_str}  HP {sh}/{smh}  G{sg}  ITEM: {si}")
+            detail_lines.append(f"  ENEMY: @{ep_str}  HP {eh}/{emh}  G{eg}  ITEM: {ei}")
+            detail_lines.append("")
+        sections.append(f"=== DETAIL (all {len(entries)} frames) ===" + "\n" + "\n".join(detail_lines).rstrip())
+
+        return "\n\n".join(sections)
 
     def decide(self, info):
         s = info[0] if isinstance(info, list) else info
@@ -226,22 +301,10 @@ class MacroAgent:
         if not self.client:
             return (2, 8, 8, 8, 8, 0), "[fallback]"
 
-        history_lines = []
-        for i, entry in enumerate(self.history):
-            f = entry.get('frame', 0)
-            t = f * 0.033
-            history_lines.append(f"[Call {i+1} | Frame {f} | T+{t:.1f}s]")
-            snap = entry.get('snapshot', '')
-            if snap:
-                history_lines.append(f"  State: {snap}")
-            raw = entry.get('raw', '')
-            if raw:
-                for line in raw.strip().split("\n"):
-                    history_lines.append(f"  {line}")
-            history_lines.append("")
-        mem_text = "\n".join(history_lines) if history_lines else "(game start, no prior calls)"
+        pb_curr = s.get("req_pb")
+        mem_text = self._build_memory_text(pb_curr)
 
-        user_msg = f"=== MEMORY (last {len(self.history)} calls) ===\n{mem_text}\n\n{state_text}"
+        user_msg = f"{mem_text}\n\n{state_text}"
         if self.state_changes_str:
             user_msg += f"\n\n=== STATE CHANGES ===\n{self.state_changes_str}"
         if self.last_results_full:
@@ -299,11 +362,64 @@ class MacroAgent:
         pb_curr = s.get("req_pb")
         frame_no = getattr(pb_curr, 'frame_no', 0) if pb_curr else 0
 
+        # Build rich data for memory
+        data = {}
+        if pb_curr:
+            for cid, tag in [(self.self_hero_id, "self"), (self.enemy_hero_id, "enemy")]:
+                hd = self._get_hero_data(pb_curr, cid)
+                if hd:
+                    data[f"{tag}_pos"] = hd["pos"]
+                    data[f"{tag}_hp"] = hd["hp"]
+                    data[f"{tag}_max_hp"] = hd["max_hp"]
+                    data[f"{tag}_gold"] = hd["gold"]
+                    data[f"{tag}_level"] = hd["level"]
+                    data[f"{tag}_item"] = hd["item"]
+
+        tower_hp = {}
+        for o in getattr(pb_curr, 'organ_list', []):
+            cid = getattr(o, 'ConfigID', 0)
+            label = {1: "BLUE outer", 2: "RED outer", 106: "BLUE crystal", 107: "RED crystal",
+                     42: "BLUE inner", 43: "RED inner"}.get(cid)
+            if label:
+                tower_hp[label] = getattr(o, 'Hp', 0)
+        data["tower_hp"] = tower_hp
+
+        # Compute DELTA vs previous frame
+        if self._prev_data is not None:
+            def _diff(cur, prev_key, fmt="{}"):
+                pv = self._prev_data.get(prev_key)
+                if pv is not None and cur != pv:
+                    return fmt.format(cur - pv)
+                return ""
+            data["delta_self_hp"] = _diff(data.get("self_hp"), "self_hp", "{:+.0f}")
+            data["delta_enemy_hp"] = _diff(data.get("enemy_hp"), "enemy_hp", "{:+.0f}")
+            data["delta_self_gold"] = _diff(data.get("self_gold"), "self_gold", "{:+.0f}")
+            data["delta_enemy_gold"] = _diff(data.get("enemy_gold"), "enemy_gold", "{:+.0f}")
+            tower_changes = []
+            for label in ["RED outer", "RED crystal", "BLUE outer", "BLUE crystal"]:
+                c = tower_hp.get(label)
+                p = self._prev_data.get("tower_hp", {}).get(label)
+                if c is not None and p is not None and c != p:
+                    tower_changes.append(f"{label} {c:.0f}({c-p:+.0f})")
+            data["delta_tower"] = ", ".join(tower_changes) if tower_changes else ""
+            data["delta_minions"] = ""  # soldier count not tracked
+        else:
+            data["delta_self_hp"] = data["delta_enemy_hp"] = ""
+            data["delta_self_gold"] = data["delta_enemy_gold"] = ""
+            data["delta_tower"] = data["delta_minions"] = ""
+
+        self._prev_data = dict(data)
+
+        pred = self._parse_prediction(self.last_thought)
+        act_name = self.last_results_full[0][:60] if self.last_results_full else "none"
+
         self.history.append({
             "frame": frame_no,
-            "snapshot": compress_state(pb_curr, self.self_hero_id) if pb_curr else "",
+            "data": data,
+            "prediction": pred,
+            "actual": "",
+            "action_name": act_name,
             "raw": raw_output.strip(),
-            "action": self.last_results_full[0] if self.last_results_full else "none",
         })
 
         state_changes = []

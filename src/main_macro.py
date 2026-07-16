@@ -44,6 +44,7 @@ from hok.common.gamecore_client import GamecoreClient
 import hok.hok1v1.lib.interface as interface
 from hero_db import hero_name
 from macro_agent import MacroAgent
+from memory import MemorySystem
 
 lib = interface.Interface()
 lib.Init(interface_default_config)
@@ -56,12 +57,14 @@ print(f"{hero_name(HERO_AI)} vs {hero_name(HERO_BOT)}, max_steps={MAX_STEPS}", f
 obs, r, d, info = env.reset(CAMP, use_common_ai=[False,True], eval=True)
 print(f"Reset OK", flush=True)
 
-agent = MacroAgent("main", HERO_AI, HERO_BOT)
+memory_sys = MemorySystem()
+agent = MacroAgent("main", HERO_AI, HERO_BOT, memory_system=memory_sys)
 
 BUTTON_NAMES = ["None1","None2","Move","Attack","Skill1","Skill2","Skill3","HealSkill","ChosenSkill","Recall","Skill4","EquipSkill"]
 start = time.time()
 step = 0
 gameover = False
+outcome = "unknown"
 
 while not gameover and step < MAX_STEPS:
     s = info[0]
@@ -89,5 +92,9 @@ while not gameover and step < MAX_STEPS:
     gameover = d[0]
     step += 1
 
+outcome = "win" if d[0] else "loss"
+agent.on_game_end(outcome)
+
 env.close_game()
-print(f"\nDONE. {step} steps in {time.time()-start:.0f}s", flush=True)
+print(f"\nDONE. {step} steps in {time.time()-start:.0f}s, outcome={outcome}", flush=True)
+print(f"Memory: {memory_sys.debug_summary()}", flush=True)

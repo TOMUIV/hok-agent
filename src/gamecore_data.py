@@ -11,6 +11,7 @@ GAMECORE_PATHS = [
 _ROLES = None
 _SKILL_JSON = None
 _EP_COST = None
+_EQUIP_NAMES = None
 
 def _find_base():
     for p in GAMECORE_PATHS:
@@ -19,9 +20,11 @@ def _find_base():
     return None
 
 def _ensure_loaded():
-    global _ROLES, _SKILL_JSON, _EP_COST
+    global _ROLES, _SKILL_JSON, _EP_COST, _EQUIP_NAMES
     base = _find_base()
     if base is None:
+        if _EQUIP_NAMES is None:
+            _EQUIP_NAMES = {}
         return
     if _ROLES is None:
         _ROLES = {}
@@ -50,6 +53,22 @@ def _ensure_loaded():
                 _SKILL_JSON = {}
         else:
             _SKILL_JSON = {}
+    if _EQUIP_NAMES is None:
+        _EQUIP_NAMES = {}
+        path = os.path.join(base, "tactics", "feature", "equipment_config_id.txt")
+        if os.path.isfile(path):
+            with open(path, "r", encoding="gbk") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split(" ", 1)
+                    if len(parts) == 2:
+                        try:
+                            _EQUIP_NAMES[int(parts[0])] = parts[1]
+                        except ValueError:
+                            pass
+
     if _EP_COST is None:
         _EP_COST = {}
         path = os.path.join(base, "common", "skill_ep_consume.txt")
@@ -142,6 +161,13 @@ def get_hero_skill_info(hero_id):
                     "ep_cost": ep,
                 }
     return result
+
+
+def get_equip_name(config_id):
+    _ensure_loaded()
+    if _EQUIP_NAMES:
+        return _EQUIP_NAMES.get(config_id, f"Equip#{config_id}")
+    return f"Equip#{config_id}"
 
 
 def format_hero_info(self_hero_id, enemy_hero_id):

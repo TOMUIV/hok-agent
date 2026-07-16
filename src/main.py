@@ -27,11 +27,14 @@ from hok.common.gamecore_client import GamecoreClient
 import hok.hok1v1.lib.interface as interface
 from openai import OpenAI
 from hero_db import hero_name
+from memory import MemorySystem
 
 API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 BASE_URL = os.environ.get("DASHSCOPE_BASE_URL", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
 MODEL = os.environ.get("MODEL_NAME", "deepseek-v4-flash")
 client = OpenAI(api_key=API_KEY, base_url=BASE_URL) if API_KEY else None
+
+memory_sys = MemorySystem()
 
 HERO_AI = 199  # 公孙离 (LLM controls)
 HERO_BOT = 169  # 后羿 (common AI)
@@ -65,6 +68,7 @@ FinalAction: ATTACK(ENEMY)
 FinalAction: SKILL_1(ENEMY,0,0)
 FinalAction: RECALL()
 """
+SYS_PROMPT += memory_sys.retrieve(HERO_AI, HERO_BOT)
 
 start = time.time()
 for step in range(30):
@@ -140,5 +144,9 @@ for step in range(30):
     if d[0]:
         print(f"GAMEOVER at step {step}!", flush=True); break
 
+outcome = "win" if d[0] else "loss"
+traj_path = os.path.join(os.path.dirname(__file__), "..", "trajectories", "last_game.jsonl")
+memory_sys.reflect(HERO_AI, HERO_BOT, outcome, step, traj_path, client)
+
 env.close_game()
-print(f"DONE. {step+1} steps in {time.time()-start:.0f}s", flush=True)
+print(f"DONE. {step+1} steps in {time.time()-start:.0f}s, outcome={outcome}", flush=True)
