@@ -1,4 +1,5 @@
 import math
+import gamecore_data
 from hero_db import hero_name
 
 BUTTON_NAMES = ["None1","None2","Move","Attack","Skill1","Skill2","Skill3","HealSkill","ChosenSkill","Recall","Skill4","EquipSkill"]
@@ -52,7 +53,7 @@ def get_legal_macro_actions(self_h, enemy_h, legal_action, self_hero_id):
 
             if skill_name == "FARM":
                 if func_name == "last_hit":
-                    if legal_action and len(legal_action) >= 12 and legal_action[3] != 1:
+                    if len(legal_action) >= 12 and int(legal_action[3]) != 1:
                         ok = False; reason = "Attack not available"
                 elif func_name in ("retreat_to_tower", "move_to_lane"):
                     pass
@@ -62,7 +63,7 @@ def get_legal_macro_actions(self_h, enemy_h, legal_action, self_hero_id):
                     pk = cfg.get("poke_skill", 1)
                     btn = {1: 4, 2: 5, 3: 6}[pk]
                     sr = skill_ranges.get(pk, 700)
-                    if legal_action and len(legal_action) >= 12 and legal_action[btn] != 1:
+                    if len(legal_action) >= 12 and int(legal_action[btn]) != 1:
                         btn_name = BTN_REVERSE.get(btn, f"btn{btn}")
                         ok = False; reason = f"Skill{pk}({btn_name}) not available"
                     elif d_enemy > sr:
@@ -72,7 +73,7 @@ def get_legal_macro_actions(self_h, enemy_h, legal_action, self_hero_id):
                         if cd > 0:
                             ok = False; reason = f"Skill{pk} on cooldown ({cd/1000:.1f}s)"
                 elif func_name == "basic_attack":
-                    if legal_action and len(legal_action) >= 12 and legal_action[3] != 1:
+                    if len(legal_action) >= 12 and int(legal_action[3]) != 1:
                         ok = False; reason = "Attack not available"
                     elif d_enemy > atk_range:
                         ok = False; reason = f"enemy out of range ({d_enemy:.0f})"
@@ -86,7 +87,7 @@ def get_legal_macro_actions(self_h, enemy_h, legal_action, self_hero_id):
                     for sn in prio:
                         btn = {1: 4, 2: 5, 3: 6}[sn]
                         sr = skill_ranges.get(sn, 700)
-                        if legal_action and legal_action[btn] == 1 and d_enemy < sr:
+                        if int(legal_action[btn]) == 1 and d_enemy < sr:
                             cd, _ = get_skill_cd(self_h, sn - 1)
                             if cd == 0:
                                 any_ok = True
@@ -96,7 +97,7 @@ def get_legal_macro_actions(self_h, enemy_h, legal_action, self_hero_id):
                     if hp_pct < 0.3:
                         ok = False; reason = f"HP too low ({hp_pct*100:.0f}%)"
                 elif func_name == "basic_attack":
-                    if legal_action and len(legal_action) >= 12 and legal_action[3] != 1:
+                    if len(legal_action) >= 12 and int(legal_action[3]) != 1:
                         ok = False; reason = "Attack not available"
                     elif d_enemy > atk_range:
                         ok = False; reason = f"enemy out of range ({d_enemy:.0f})"
@@ -124,6 +125,8 @@ def get_legal_macro_actions(self_h, enemy_h, legal_action, self_hero_id):
 
 def parse_state(info, self_hero_id=None):
     s = info if isinstance(info, dict) else info[0]
+    if not isinstance(s, dict):
+        return "[Invalid state]", None
     pb = s.get("req_pb")
     if not pb:
         return "[No game state]", None
@@ -284,6 +287,8 @@ def parse_state(info, self_hero_id=None):
 
     lines.append("")
     lines.append("--- MACRO ACTIONS ---")
+    if not isinstance(s, dict):
+        return "\n".join(lines) + "\n[state not dict]", None
     la = s.get("legal_action", [])
     macro_lines = get_legal_macro_actions(self_h, enemy_h, la, self_hero_id)
     if macro_lines:

@@ -5,6 +5,125 @@ MEMORY_JSON = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                            "trajectories", "memory.json")
 RETRY_MAX = 3
 
+# ── Semantic Rule Dedup (方案二：结构化字段匹配) ──
+SKILL_NAMES = {'FARM', 'POKE', 'ALL_IN', 'RETREAT', 'DEFEND', 'KITE'}
+
+ACTION_KEYWORDS = {
+    'retreat': ['retreat', 'fall back', 'back off', 'fallback', 'recover', 'fountain'],
+    'push':    ['push', 'clear', 'shove', 'advance', 'pressure', 'wave'],
+    'harass':  ['harass', 'poke', 'harass'],
+    'farm':    ['farm', 'last hit', 'move to lane', 'cs', 'minion', 'lane'],
+    'all_in':  ['all_in', 'combo', 'engage', 'commit', 'fight', 'all-in'],
+    'defend':  ['defend', 'guard', 'protect', 'safe'],
+    'kite':    ['kite', 'reposition', 'position'],
+}
+
+THRESHOLD_ACTION = 10  # 阈值差值 ≤ 10 视为等价
+
+
+def _norm_rule(text):
+    t = text.lower().strip()
+    t = re.sub(r'(\w+)\.(\w+)\(.*?\)', r'\1.\2', t)
+    t = re.sub(r'\bcall\b', '', t)
+    t = t.replace('→', '->')
+    t = re.sub(r'\bbelow\b', '<', t).replace('<=', '<=')
+    t = re.sub(r'\babove\b', '>', t).replace('>=', '>=')
+    t = re.sub(r'\bless than\b', '<', t)
+    t = re.sub(r'\bgreater than\b', '>', t)
+    t = re.sub(r'\bno more than\b', '<=', t)
+    t = re.sub(r'\bat least\b', '>=', t)
+    t = re.sub(r'\bhp\b', 'hp', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
+def _cls_action(act_text):
+    for act, kws in ACTION_KEYWORDS.items():
+        if any(kw in act_text for kw in kws):
+            return act
+    return None
+
+
+def _parse_rule(text):
+    p = {'skill': None, 'action': None, 'cond_domain': None,
+         'cond_op': None, 'cond_val': None}
+    t = _norm_rule(text).lower().strip()
+    parts = re.split(r'\s*->\s*', t, maxsplit=1)
+    cond = parts[0] if len(parts) > 1 else t
+    act  = parts[1] if len(parts) > 1 else ''
+
+    for sn in SKILL_NAMES:
+        if sn.lower() in t:
+            p['skill'] = sn
+            break
+    if act:
+        p['action'] = _cls_action(act)
+
+    m = re.search(r'(hp|health)\s*(<|>|<=|>=|=)?\s*(\d+)', cond)
+    if m:
+        p['cond_domain'] = 'HP'
+        p['cond_op'] = m.group(2) or '<'
+        p['cond_val'] = int(m.group(3))
+        return p
+    m = re.search(r'distance\D*(<|>|<=|>=)\s*(\d+)', cond)
+    if m:
+        p['cond_domain'] = 'DISTANCE'
+        p['cond_op'] = m.group(1)
+        p['cond_val'] = int(m.group(2))
+        return p
+    m = re.search(r'between\s*(\d+)\s*and\s*(\d+)', cond)
+    if m:
+        p['cond_domain'] = 'DISTANCE'
+        p['cond_op'] = 'BETWEEN'
+        p['cond_val'] = (int(m.group(1)), int(m.group(2)))
+        return p
+    m = re.search(r'within\s*(\d+)', cond)
+    if m:
+        p['cond_domain'] = 'DISTANCE'
+        p['cond_op'] = '<'
+        p['cond_val'] = int(m.group(1))
+        return p
+    if re.search(r'(self_x|enemy_x)\s*[<>=]', cond) or 'past' in cond:
+        p['cond_domain'] = 'POSITION'
+        return p
+    return p
+
+
+def _field_match(pa, pb):
+    if not pa or not pb:
+        return 0.0
+    total = 0.0
+    hits  = 0.0
+
+    skill_ok = pa['skill'] and pb['skill']
+    action_ok = pa['action'] and pb['action']
+    domain_ok = pa['cond_domain'] and pb['cond_domain']
+    val_ok = pa['cond_val'] is not None and pb['cond_val'] is not None
+
+    if skill_ok:
+        total += 3
+        if pa['skill'] == pb['skill']:
+            hits += 3
+    if action_ok:
+        total += 3
+        if pa['action'] == pb['action']:
+            hits += 3
+    if domain_ok:
+        total += 1
+        if pa['cond_domain'] == pb['cond_domain']:
+            hits += 1
+    if val_ok:
+        total += 1.5
+        if isinstance(pa['cond_val'], tuple) and isinstance(pb['cond_val'], tuple):
+            d1 = abs(pa['cond_val'][0] - pb['cond_val'][0])
+            d2 = abs(pa['cond_val'][1] - pb['cond_val'][1])
+            if d1 <= THRESHOLD_ACTION and d2 <= THRESHOLD_ACTION:
+                hits += 1.5
+        else:
+            if abs(pa['cond_val'] - pb['cond_val']) <= THRESHOLD_ACTION:
+                hits += 1.5
+    return hits / max(total, 1e-10)
+
 
 def _read_trajectory(path):
     entries = []
@@ -119,16 +238,72 @@ class MemorySystem:
     def _load(self):
         if not os.path.isfile(self.path):
             return
-        with open(self.path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        self.episodic = data.get("episodic", [])
-        self.semantic = data.get("semantic", [])
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.episodic = data.get("episodic", [])
+            self.semantic = data.get("semantic", [])
+        except (json.JSONDecodeError, Exception):
+            self.episodic = []
+            self.semantic = []
 
     def save(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump({"episodic": self.episodic, "semantic": self.semantic},
                       f, ensure_ascii=False, indent=2)
+
+    def _similar_episodic(self, a, b):
+        """比较两条情节记忆是否相似（使用_similar的语义判断）"""
+        lesson_a = (a.get("lesson") or "").strip()
+        lesson_b = (b.get("lesson") or "").strip()
+        if not lesson_a or not lesson_b:
+            return False
+        return self._similar(lesson_a, lesson_b)
+
+    def _dedup_episodic(self, new_item):
+        """去重：找到相似的情节记忆，合并分数，返回True表示已合并"""
+        for existing in self.episodic:
+            if existing.get("hero_ai") != new_item.get("hero_ai"):
+                continue
+            if existing.get("hero_bot") != new_item.get("hero_bot"):
+                continue
+            if existing.get("source_event") != new_item.get("source_event"):
+                continue
+            if self._similar_episodic(existing, new_item):
+                existing["supported"] = existing.get("supported", 0) + new_item.get("supported", 1)
+                existing["contradicted"] = existing.get("contradicted", 0) + new_item.get("contradicted", 0)
+                existing["updated_at"] = time.time()
+                return True
+        return False
+
+    def _dedup_semantic(self, hero_ai, hero_bot, rule_text, ai_id, bot_id, outcome, game_id):
+        """语义规则去重（原_merge_semantic逻辑+分数更新）"""
+        self._merge_semantic(hero_ai, hero_bot, rule_text, ai_id, bot_id, outcome, game_id)
+
+    def prune(self, min_supported=1, max_age_days=30):
+        """策展清理：移除低质量/过期记忆"""
+        now = time.time()
+        cutoff = now - max_age_days * 86400
+
+        before_epi = len(self.episodic)
+        self.episodic = [
+            e for e in self.episodic
+            if e.get("supported", 0) + e.get("contradicted", 0) >= min_supported
+            and e.get("timestamp", now) > cutoff
+        ]
+        after_epi = len(self.episodic)
+
+        before_sem = len(self.semantic)
+        self.semantic = [
+            s for s in self.semantic
+            if s.get("supported", 0) + s.get("contradicted", 0) >= min_supported
+            and s.get("updated_at", now) > cutoff
+        ]
+        after_sem = len(self.semantic)
+
+        return {"episodic_removed": before_epi - after_epi,
+                "semantic_removed": before_sem - after_sem}
 
     def _get_humantic(self, hero_ai, hero_bot):
         from skill_db import get_matchup
@@ -139,13 +314,45 @@ class MemorySystem:
                          ["summary", "advantage", "danger", "tip_offense",
                           "tip_defense", "power_spike", "key_skill"] if k in mu)
 
+    @staticmethod
+    def _importance_score(item):
+        """事件重要性打分（Generative Agents 灵感）"""
+        ev = item.get("source_event", "seed") if item.get("kind") == "episodic" else "semantic"
+        importance = {
+            "kill": 5, "death": 4, "tower_fall": 4,
+            "power_spike": 3, "gold_spike": 2,
+            "minion_wave": 1, "seed": 2, "GLOBAL": 3, "semantic": 2,
+        }.get(ev, 2)
+        # 支持率越高越重要
+        sup = item.get("supported", 1)
+        ctr = item.get("contradicted", 0)
+        support_ratio = sup / max(sup + ctr, 1)
+        return importance * (0.5 + 0.5 * support_ratio)
+
+    @staticmethod
+    def _recency_factor(timestamp):
+        """时效性衰减（半衰期7天）"""
+        if not timestamp:
+            return 0.5
+        days_old = (time.time() - timestamp) / 86400
+        return 0.5 ** (days_old / 7)
+
+    @staticmethod
+    def _retrieval_score(item):
+        """综合检索评分 = 重要性 × 时效性"""
+        imp = MemorySystem._importance_score(item)
+        rec = MemorySystem._recency_factor(item.get("timestamp"))
+        return imp * rec
+
     def retrieve(self, hero_ai, hero_bot):
         sections = []
         hum = self._get_humantic(hero_ai, hero_bot)
         if hum:
             sections.append("--- HUMANTIC (human guide, reference only, do not score) ---\n" + hum)
 
-        epi = [e for e in self.episodic if e.get("hero_ai") == hero_ai and e.get("hero_bot") == hero_bot]
+        epi = [e for e in self.episodic
+               if (e.get("hero_ai") == hero_ai and e.get("hero_bot") == hero_bot)
+               or (e.get("hero_ai") is None and e.get("hero_bot") is None)]
         epi.sort(key=lambda e: e.get("timestamp", 0), reverse=True)
         if epi:
             sec = ["--- EPISODIC ---"]
@@ -155,11 +362,13 @@ class MemorySystem:
                 if e.get("lesson"): sec.append(f"    lesson: {e['lesson'][:200]}")
             sections.append("\n".join(sec))
 
-        sem = [s for s in self.semantic if s.get("hero_ai") == hero_ai and s.get("hero_bot") == hero_bot]
+        sem = [s for s in self.semantic
+               if (s.get("hero_ai") == hero_ai and s.get("hero_bot") == hero_bot)
+               or (s.get("hero_ai") is None and s.get("hero_bot") is None)]
         sem.sort(key=lambda s: s.get("supported", 0) / max(s.get("contradicted", 0) + s.get("supported", 0), 1), reverse=True)
         if sem:
             sec = ["--- SEMANTIC ---"]
-            for s in sem[:5]:
+            for s in sem[:10]:
                 sup = s.get("supported", 0); ctr = s.get("contradicted", 0)
                 sec.append(f"  {s.get('rule','')} ({sup}/{sup+ctr} supported)")
             sections.append("\n".join(sec))
@@ -220,7 +429,7 @@ class MemorySystem:
         if reply4:
             kept = _parse_audit_scores(reply4, buffer, self.episodic, self.semantic)
 
-        # ── Merge kept BUFFER items to DB ──
+        # ── Merge kept BUFFER items to DB (带过去重) ──
         for item in kept:
             if item["kind"] == "episodic":
                 item["hero_ai"] = hero_ai
@@ -228,9 +437,10 @@ class MemorySystem:
                 item["hero_ai_name"] = ai_name
                 item["hero_bot_name"] = bot_name
                 item["timestamp"] = time.time()
-                self.episodic.append(item)
+                if not self._dedup_episodic(item):
+                    self.episodic.append(item)
             else:
-                self._merge_semantic(hero_ai, hero_bot, item.get("rule", ""),
+                self._dedup_semantic(hero_ai, hero_bot, item.get("rule", ""),
                                      hero_ai, hero_bot, outcome, game_id)
         self.save()
 
@@ -279,13 +489,79 @@ class MemorySystem:
             "created_at": time.time(), "updated_at": time.time(), "active": True,
         })
 
+    @staticmethod
+    def _normalize(text):
+        """预处理：小写、去标点、去停用词、术语归一化"""
+        import re
+        stops = {"the", "a", "an", "to", "in", "of", "for", "on", "and", "or",
+                 "is", "are", "was", "were", "be", "been", "do", "does", "did",
+                 "then", "than", "that", "this", "with", "at", "from", "as",
+                 "when", "while", "not", "no", "but", "by", "if", "it", "its",
+                 "so", "up", "all", "just", "very", "too", "also", "can", "get"}
+        # 游戏术语归一化
+        synonyms = {
+            "ult": "ultimate", "ulti": "ultimate", "r": "ultimate",
+            "hp": "health", "health": "health",
+            "cd": "cooldown", "cooldown": "cooldown",
+            "fow": "fog", "fog": "fog",
+            "atk": "attack", "attack": "attack",
+            "def": "defense", "defense": "defense",
+            "move": "movement", "movement": "movement",
+            "enemy": "enemy", "enemies": "enemy",
+            "dmg": "damage", "damage": "damage",
+            "burst": "burst", "nuke": "burst",
+            "tower": "tower", "turret": "tower",
+            "recall": "recall", "back": "recall", "retreat": "recall",
+            "engage": "engage", "initiate": "engage",
+            "poke": "poke", "harass": "poke",
+        }
+        text = re.sub(r"[^\w\s>]", " ", text.lower())
+        tokens = text.split()
+        # 同义词替换
+        tokens = [synonyms.get(w, w) for w in tokens]
+        # 停用词过滤
+        tokens = [w for w in tokens if w not in stops and len(w) > 1]
+        return tokens
+
+    @staticmethod
+    def _ngrams(tokens, n=3):
+        """生成字符n-gram用于结构相似度"""
+        text = " ".join(tokens)
+        return {text[i:i+n] for i in range(len(text)-n+1)}
+
+    @staticmethod
+    def _extract_key_phrases(text):
+        """提取关键动作模式: condition -> action / skill.func() 模式"""
+        import re
+        phrases = set()
+        # 提取 SKILL_CALL 模式
+        for m in re.finditer(r"[A-Z]+\.\w+\(\)", text):
+            phrases.add(m.group())
+        # 提取 -> 前后的关键短语
+        parts = re.split(r"->|→", text)
+        for p in parts:
+            p = p.strip().lower()
+            if len(p) > 3 and len(p) < 100:
+                phrases.add(p)
+        return phrases
+
     def _similar(self, a, b):
+        """方案二：结构化字段匹配（归一化 + field_score）"""
         if not a or not b:
             return False
         if a == b:
             return True
-        wa, wb = set(a.lower().split()), set(b.lower().split())
-        return len(wa & wb) / max(len(wa), len(wb)) > 0.6
+        # Level 1: 归一化精确匹配
+        na, nb = _norm_rule(a), _norm_rule(b)
+        if na == nb:
+            return True
+        ca = na.split('->')[0].strip() if '->' in na else na
+        cb = nb.split('->')[0].strip() if '->' in nb else nb
+        if ca == cb:
+            return True
+        # Level 2: 结构化字段匹配
+        pa, pb = _parse_rule(a), _parse_rule(b)
+        return _field_match(pa, pb) >= 0.7
 
     def debug_summary(self):
         return {

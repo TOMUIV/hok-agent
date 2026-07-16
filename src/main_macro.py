@@ -13,8 +13,9 @@ HERO_BOT = args.hero_bot
 MAX_STEPS = args.steps
 PRINT_EVERY = args.print_every
 
+os.chdir("/hok_env/hok/hok1v1")
 os.environ["GAMECORE_SERVER_ADDR"] = "host.docker.internal:23432"
-os.environ["AI_SERVER_ADDR"] = "172.24.50.71"
+os.environ["AI_SERVER_ADDR"] = "172.17.208.1"
 
 base = "/hok_env/hok/hok1v1"
 ailab = os.path.join(base, "AILab")
@@ -23,19 +24,19 @@ for d in ["ai_config/ai_server/skill_type","ai_config/5v5/tactics/feature","ai_c
 ailab_files = {
     "ai_server_conf.json": '{"game_mode":"1v1"}', "transfer_table.json": "{}",
     "ai_config/AiMgr.txt": "skill 0 1 2", "ai_config/ai_server/skill_type/2": "0",
-    "ai_config/ai_server/rl_config_file.txt": "",
-    "ai_config/ai_server/pb2struct/pb2struct_config_server.txt": "",
-    "ai_config/5v5/tactics/feature/skill_state_description_config.txt": "",
-    "ai_config/5v5/tactics/feature/4_skill_hero_skill_state_description_config.txt": "",
-    "ai_config/5v5/common/skill_manager_config.txt": "",
-    "ai_config/5v5/tactics/feature/bit_map_250_organ_1v1.dat": "",
-    "ai_config/5v5/tactics/multi_task_tactics_config_file_two_hand_action_minimap_union_model_rl.txt": "",
+    "ai_config/ai_server/rl_config_file.txt": " ",
+    "ai_config/ai_server/pb2struct/pb2struct_config_server.txt": " ",
+    "ai_config/5v5/tactics/feature/skill_state_description_config.txt": " ",
+    "ai_config/5v5/tactics/feature/4_skill_hero_skill_state_description_config.txt": " ",
+    "ai_config/5v5/common/skill_manager_config.txt": " ",
+    "ai_config/5v5/tactics/feature/bit_map_250_organ_1v1.dat": " ",
+    "ai_config/5v5/tactics/multi_task_tactics_config_file_two_hand_action_minimap_union_model_rl.txt": " ",
 }
 for p, c in ailab_files.items():
     with open(os.path.join(ailab, p), "w") as f:
         f.write(c)
 
-sys.path.insert(0, "/workspace/src")
+sys.path.insert(0, "/workspace")
 from dotenv import load_dotenv
 load_dotenv("/workspace/.env")
 from hok.hok1v1.env1v1 import interface_default_config, HoK1v1
@@ -50,21 +51,22 @@ lib = interface.Interface()
 lib.Init(interface_default_config)
 gl = GamecoreClient(server_addr="host.docker.internal:23432", gamecore_req_timeout=60000,
     default_hero_config=get_default_hero_config())
-env = HoK1v1("macro", gl, lib, ["tcp://0.0.0.0:35500","tcp://0.0.0.0:35501"], aiserver_ip="172.24.50.71")
+env = HoK1v1("macro", gl, lib, ["tcp://0.0.0.0:35500","tcp://0.0.0.0:35501"], aiserver_ip="127.0.0.1")
 
 CAMP = {"mode":"1v1","heroes":[[{"hero_id":HERO_AI}],[{"hero_id":HERO_BOT}]]}
 print(f"{hero_name(HERO_AI)} vs {hero_name(HERO_BOT)}, max_steps={MAX_STEPS}", flush=True)
 obs, r, d, info = env.reset(CAMP, use_common_ai=[False,True], eval=True)
 print(f"Reset OK", flush=True)
 
-memory_sys = MemorySystem()
-agent = MacroAgent("main", HERO_AI, HERO_BOT, memory_system=memory_sys)
+# 记忆系统：局前加载经验
+memory = MemorySystem()
+experience = memory.retrieve(HERO_AI, HERO_BOT)
+agent = MacroAgent("main", HERO_AI, HERO_BOT, experience=experience)
 
 BUTTON_NAMES = ["None1","None2","Move","Attack","Skill1","Skill2","Skill3","HealSkill","ChosenSkill","Recall","Skill4","EquipSkill"]
 start = time.time()
 step = 0
 gameover = False
-outcome = "unknown"
 
 while not gameover and step < MAX_STEPS:
     s = info[0]
@@ -92,9 +94,17 @@ while not gameover and step < MAX_STEPS:
     gameover = d[0]
     step += 1
 
-outcome = "win" if d[0] else "loss"
-agent.on_game_end(outcome)
+# 记忆系统：局后反思
+try:
+    import macro_agent as ma
+    traj_path = ma.traj_path if hasattr(ma, 'traj_path') else ""
+    outcome = "loss" if d[0] else "win"
+    if agent.client and traj_path:
+        memory.reflect(HERO_AI, HERO_BOT, outcome, frame, traj_path, agent.client)
+    if hasattr(memory, 'debug_summary'):
+        print(f"[Memory] {memory.debug_summary()}", flush=True)
+except Exception as e:
+    print(f"[Memory reflect error] {e}", flush=True)
 
 env.close_game()
-print(f"\nDONE. {step} steps in {time.time()-start:.0f}s, outcome={outcome}", flush=True)
-print(f"Memory: {memory_sys.debug_summary()}", flush=True)
+print(f"\nDONE. {step} steps in {time.time()-start:.0f}s", flush=True)
