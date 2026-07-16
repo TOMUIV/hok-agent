@@ -1,10 +1,15 @@
-import math, re
+﻿import math, re
+from tools import TOOL_REGISTRY, execute_tool
 from skill_base import SKILL_REGISTRY
 import skills
+from pathfinding import astar
 
 CENTER = 8
 BTN_MOVE, BTN_ATTACK = 2, 3
 BTN_SKILLS = {1:4, 2:5, 3:6, 4:10}
+
+BUTTONS = ["None1","None2","Move","Attack","Skill1","Skill2","Skill3","HealSkill","ChosenSkill","Recall","Skill4","EquipSkill"]
+MACRO_ACTIONS = ["FARM", "POKE", "ALL_IN", "KITE", "RETREAT", "DEFEND", "STAND_AND_SHOOT", "SYSTEM_HELP", "PURSUE", "MOVE_TO", "ATTACK_TARGET", "RECALL", "USE_SKILL"]
 
 def clamp(v):
     return max(1, min(15, int(round(v))))
@@ -35,7 +40,8 @@ class SkillContext:
 
     def refresh(self, info):
         self.la = info.get("legal_action", [])
-        pb = info.get("req_pb")
+        self.pb = info.get("req_pb")
+        pb = self.pb
         if not pb: return False
         for h in getattr(pb, "hero_list", []):
             if h.config_id == self.self_hero_id: self.sh = h
@@ -67,7 +73,22 @@ class SkillContext:
         return (BTN_MOVE, mx, my, CENTER, CENTER, get_target(self.la, BTN_MOVE))
 
     def make_move_to(self, tx, ty):
-        mx, my = direction_to(self.px, self.py, tx, ty)
+        obstacles = None
+        if self.pb:
+            organs = getattr(self.pb, 'organ_list', [])
+            if organs:
+                def organ_pos(o):
+                    loc = getattr(o, 'location', None)
+                    if loc:
+                        return (getattr(loc, 'x', 0), getattr(loc, 'z', 0))
+                    return (getattr(o, 'x', 0), getattr(o, 'z', 0))
+                obstacles = [(organ_pos(o)[0], organ_pos(o)[1], 800) for o in organs]
+        path = astar(self.px, self.py, tx, ty, obstacles)
+        if path and len(path) > 1:
+            nx, ny = path[1]
+        else:
+            nx, ny = tx, ty
+        mx, my = direction_to(self.px, self.py, nx, ny)
         return self.make_move(mx, my)
 
     def make_attack(self):
@@ -86,7 +107,7 @@ class ProtocolExecutor:
         self.self_hero_id = self_hero_id
         self.ctx = SkillContext(self_hero_id)
         self.last_actions = []
-        self.current_skill_obj = None
+        self._concrete_skill = None
 
     def step(self, info):
         if not self.ctx.refresh(info):
@@ -96,7 +117,58 @@ class ProtocolExecutor:
             action = self.last_actions.pop(0)
             return action, ""
 
+        # 持续执行同一个skill直到LLM换新的
+        if self._concrete_skill is not None:
+            try:
+                if not self._concrete_skill.ctx.refresh(info):
+                    self._concrete_skill = None
+                else:
+                    px = self._concrete_skill.ctx.px
+                    action, done = self._concrete_skill.update()
+                    btn = action[0]
+                    if btn == 2:
+                        mx, mz = action[1], action[2]
+                        if abs(mx-8) < 1 and abs(mz-8) < 1:
+                            pass  # stopped
+                    if done:
+                        self._concrete_skill = None
+                    return action, ""
+            except:
+                self._concrete_skill = None
+
+        # 还没有skill（LLM还没决策）→ 默认用FARM向前走
+        try:
+            from skills_concrete import SKILL_REGISTRY as CONCRETE_REGISTRY, SkillContext as ConcreteCtx
+            sk_cls = CONCRETE_REGISTRY.get("FARM")
+            if sk_cls:
+                sk = sk_cls()
+                sk.ctx = ConcreteCtx(self.self_hero_id)
+                sk.ctx.refresh(info)
+                sk.params = {}
+                if hasattr(sk, '_start'):
+                    sk._start()
+                self._concrete_skill = sk
+                action, done = sk.update()
+                return action, ""
+        except:
+            pass
         return self.ctx.make_move(8, 8), ""
+
+    def execute_macro(self, macro_name, info):
+        if not self.ctx.refresh(info):
+            return (2, 8, 8, 8, 8, 0)
+        from skills_concrete import SKILL_REGISTRY as CONCRETE_REGISTRY, SkillContext as ConcreteCtx
+        sk_cls = CONCRETE_REGISTRY.get(macro_name)
+        if not sk_cls:
+            return self.ctx.make_move(8, 8)
+        sk = sk_cls()
+        sk.ctx = ConcreteCtx(self.self_hero_id)
+        sk.ctx.refresh(info)
+        sk.params = {}
+        if hasattr(sk, '_start'):
+            sk._start()
+        action, _ = sk.update()
+        return action
 
     def process_batch(self, info, llm_output):
         if not self.ctx.refresh(info):
@@ -109,21 +181,51 @@ class ProtocolExecutor:
             if not line or line.startswith("Thought") or line.startswith("WhatIf"):
                 continue
 
-            m = re.match(r"@SKILL_CALL\s+(\w+)\.(\w+)\(([^)]*)\)", line)
+            m = re.match(r"@TOOL\s+(\w+)\(([^)]*)\)", line)
             if m:
-                sk_name, func_name, params_str = m.group(1), m.group(2), m.group(3)
-                sk = SKILL_REGISTRY.get(sk_name)
-                if not sk:
-                    results.append({"type": "error", "msg": f"unknown skill: {sk_name}"})
-                    continue
+                name, params_str = m.group(1), m.group(2)
                 params = {}
                 for p in params_str.split(","):
                     if "=" in p:
                         k, v = p.split("=", 1)
                         params[k.strip()] = v.strip()
-                result = sk.execute(func_name, self.ctx, params)
-                self.current_skill_obj = sk
-                results.append({"type": "skill_call", "skill": sk_name, "func": func_name, "result": result})
+                info["_self_id"] = self.ctx.sh
+                result = execute_tool(name, info, **params)
+                results.append({"type": "tool", "name": name, "result": result})
+                continue
+
+            m = re.match(r"@SKILL_OPEN\s+(\w+)", line)
+            if m:
+                sk_name = m.group(1)
+                sk = SKILL_REGISTRY.get(sk_name)
+                if sk:
+                    results.append({"type": "skill_open", "name": sk_name, "doc": sk.get_doc()})
+                else:
+                    results.append({"type": "error", "msg": f"unknown skill: {sk_name}"})
+                continue
+
+            m = re.match(r"@SKILL_CALL\s+(\w+)\.(\w+)\(([^)]*)\)", line)
+            if m:
+                sk_name = m.group(1)
+                from skills_concrete import SKILL_REGISTRY as CONCRETE_REGISTRY, SkillContext as ConcreteCtx
+                sk_cls = CONCRETE_REGISTRY.get(sk_name)
+                if sk_cls:
+                    sk = sk_cls()
+                    sk.ctx = ConcreteCtx(self.self_hero_id)
+                    sk.ctx.refresh(info)
+                    sk.params = {}
+                    if hasattr(sk, '_start'):
+                        sk._start()
+                    # 每次LLM调用时替换当前skill，之后step()会持续执行它
+                    self._concrete_skill = sk
+                    self.last_actions.clear()
+                    # 首帧动作立即放入队列
+                    action, done = sk.update()
+                    self.last_actions.append(action)
+                    results.append({"type": "skill_call", "skill": sk_name, "func": m.group(2)})
+                else:
+                    results.append({"type": "error", "msg": f"unknown concrete skill: {sk_name}"})
                 continue
 
         return results
+

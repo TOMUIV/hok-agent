@@ -1,0 +1,187 @@
+{
+  "episodic": [],
+  "semantic": [
+    {
+      "rule": "HP below 1% (just respawned) -> call FARM to move to lane",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "self_x within 2000 of spawn and HP below 60% -> call RETREAT to recover at fountain",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "HP below 30% -> call RETREAT to fall back",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "enemy HP <= 0 (enemy just died) -> call FARM to push lane and last hit minions",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "2 or more enemy minions within 5000 range -> call DEFEND to clear wave first",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "self_x past danger_x (enemy tower range) -> call RETREAT to avoid tower aggro",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "self_x past center of map (x > 0) -> call POKE to harass enemy from mid range",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "enemy_x past danger_x - 1000 and self_x > -20000 -> call POKE to pressure enemy near tower",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "HP below 35% and enemy has HP advantage -> call RETREAT to avoid being killed",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "distance to enemy > 8000 -> call FARM to move forward toward lane",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "distance to enemy between 3500 and 8000 -> call POKE to approach and harass",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "HP above 60% and enemy in range -> call ALL_IN to commit to the fight",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "default when none of above apply -> call KITE to reposition safely",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    },
+    {
+      "rule": "after calling RETREAT, stay in RETREAT until reaching spawn area",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_sm"
+      ],
+      "created_at": 1784225966.3002737,
+      "updated_at": 1784225966.3002737,
+      "active": true
+    }
+  ]
+}
