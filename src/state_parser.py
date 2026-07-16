@@ -186,7 +186,7 @@ def parse_state(info, self_hero_id=None):
             ox = getattr(o, 'x', None)
             oz = getattr(o, 'z', None)
             if ox is not None and oz is not None:
-                d = dist(sp[0], sp[1], oz, ox)
+                d = dist(sp[0], sp[1], ox, oz)
                 if d < min_tower_d:
                     min_tower_d = d
     if min_tower_d < 1e8:

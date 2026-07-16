@@ -33,6 +33,9 @@ __pycache__/
 # Research papers (read-only references)
 papers/
 
+# Local-only variant (not for distribution)
+src_v2/
+
 # Debug scripts (internal use only)
 src/dat_debug.py
 src/decode_config.py

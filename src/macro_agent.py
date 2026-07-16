@@ -1,6 +1,5 @@
 import re, os, json, time, collections
 from openai import OpenAI
-from hero_db import hero_name
 from state_parser import parse_state, compress_state
 from strategy_executor import ProtocolExecutor
 from skill_db import get_matchup
@@ -290,10 +289,6 @@ class MacroAgent:
                     self.last_results_full.append(f"@SKILL_CALL {r['skill']}.{r['func']}() → {result}")
             elif r["type"] == "error":
                 self.last_results_full.append(f"ERROR: {r['msg']}")
-            elif r["type"] == "tool":
-                self.last_results_full.append(f"@TOOL {r['name']} → {r['result']}")
-            elif r["type"] == "skill_open":
-                self.last_results_full.append(f"@SKILL_OPEN {r['name']} → doc opened")
 
         raw_output = ""
         if self.last_thought:

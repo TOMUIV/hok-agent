@@ -6,7 +6,7 @@
 > **代码仓库**：https://github.com/TOMUIV/hok-agent  
 > **选题报告**：`选题报告_v2生成版.docx`  
 > **重要日期**：2026-07-17 现场展示  
-> **最后更新**：2026-07-13
+> **最后更新**：2026-07-16
 
 ---
 
@@ -297,184 +297,200 @@
 
 ## 4. 系统设计
 
-### 4.1 总体架构
+### 4.1 总体架构（当前实现）
 
 ```
-                    ╔══════════════════════════════════╗
-                    ║       记忆系统（贯穿全流程）      ║
-                    ║  ┌──────────────────────────┐   ║
-                    ║  │  经验集（全局知识）        │   ║
-                    ║  ├──────────────────────────┤   ║
-                    ║  │  技能库（可复用策略）      │   ║
-                    ║  ├──────────────────────────┤   ║
-                    ║  │  情景缓冲区（当前轨迹）    │   ║
-                    ║  └──────────────────────────┘   ║
-                    ╚══════════════════════════════════╝
-                              ↕ 检索/写入
-
 ┌─────────────────────────────────────────────────────────┐
-│  Layer 3: LLM 决策层 (deepseek-v4-flash)                 │
-│  ┌─────────────────────────────────────────────────┐    │
-│  │  System Prompt (TiG 风格：盘面理解/阵容分析/    │    │
-│  │    时机判断/特殊场景)                           │    │
-│  │  ← BPO 优化器自动改进                           │    │
-│  │  ← 记忆系统注入历史经验                         │    │
-│  │  → 输出：宏观策略决策（推塔/撤退/团战/发育等）  │    │
-│  └─────────────────────────┬───────────────────────┘    │
-└────────────────────────────┼────────────────────────────┘
-                             ↓
+│  SYSTEM PROMPT (预定义，运行时分发 hero_info/skilldoc)    │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │  GAME RULES (全部从 gamecore/ config 提取)        │   │
+│  │    GAME MODE / MAP CONFIG / HERO STAT RANGES     │   │
+│  │    STRUCTURES / SOLDIERS / MONSTERS / TIMING     │   │
+│  │    SPRING / HERO INFO (双方英雄技能数据)           │   │
+│  │  MACRO SKILLS (skill_base 文档注入)               │   │
+│  │  PROTOCOL + FEW-SHOT (FOW强调/多SKILL_CALL)      │   │
+│  └──────────────────────────────────────────────────┘   │
+└──────────────────────────┬──────────────────────────────┘
+                           ↓
 ┌─────────────────────────────────────────────────────────┐
-│  Layer 2: 策略执行层                                     │
-│  ┌─────────────────────────────────────────────────┐    │
-│  │  宏观策略 → 技能组合映射                         │    │
-│  │  走位控制：A* 寻路算法                            │    │
-│  │  输出：6-tuple (btn, mv_x, mv_z, sk_x, sk_z, tgt)│    │
-│  └─────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────┘
-                             ↓
+│  USER PROMPT (每帧动态构造)                               │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │  MEMORY (过去 100 次 LLM 调用)                   │   │
+│  │    [Call N | Frame n | T+t]                      │   │
+│  │      State: 压缩快照 (SELF/ENEMY/塔/小兵)         │   │
+│  │      <think>原始推理</think>                      │   │
+│  │      <action>原始动作</action>                    │   │
+│  ├──────────────────────────────────────────────────┤   │
+│  │  FRAME (完整盘面)                                 │   │
+│  │    HEROES (含技能冷却/属性/位置/FOW)               │   │
+│  │    TOWERS (6座建筑HP/坐标)                        │   │
+│  │    MINIONS / MONSTERS / LEGAL ACTIONS            │   │
+│  │    DISTANCES (敌方/最近塔/最近兵)                  │   │
+│  ├──────────────────────────────────────────────────┤   │
+│  │  STATE CHANGES (对比10帧前的protobuf快照)          │   │
+│  │    SELF: HP差/Gold差/等级变化                      │   │
+│  │    RED outer: 塔HP差                              │   │
+│  ├──────────────────────────────────────────────────┤   │
+│  │  LAST RESULTS (上一轮技能执行结果)                  │   │
+│  │    @SKILL_CALL FARM.last_hit()                   │   │
+│  │      action: last_hit                            │   │
+│  │      status: success                             │   │
+│  └──────────────────────────────────────────────────┘   │
+└──────────────────────────┬──────────────────────────────┘
+                           ↓
 ┌─────────────────────────────────────────────────────────┐
-│  Layer 1: 游戏引擎层                                     │
+│  LLM (deepseek-v4-flash)                                 │
+│  输出: <think>盘面+WhatIf+决策</think>                    │
+│        <action>@SKILL_CALL <SKILL>.<func>()</action>    │
+└──────────────────────────┬──────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────┐
+│  策略执行层 (strategy_executor.py)                        │
+│  process_batch(): 解析 @SKILL_CALL → skill.execute()    │
+│  step(): skill生成 6-tuple (btn, mx, mz, sx, sz, tgt)   │
+│  通过 legal_action 掩码验证按钮合法性                      │
+│  路径规划: skills_concrete.py (11个具体技能)               │
+└──────────────────────────┬──────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────┐
+│  游戏引擎层                                              │
 │  ┌─────────────────────┐  ┌─────────────────────────┐   │
-│  │  MockEnv             │  │  Gamecore (Docker)      │   │
-│  │  快速原型验证        │  │  真实环境校验           │   │
-│  │  秒级迭代            │  │  最终性能评估           │   │
+│  │  MockEnv (快速迭代)  │  │  Gamecore (Docker)      │   │
+│  │  protobuf 协议兼容  │  │  真实游戏引擎            │   │
 │  └─────────────────────┘  └─────────────────────────┘   │
 └─────────────────────────────────────────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  数据来源: gamecore/ 配置文件 (不含 src/ 代码)
+    simulator_output/*.json   → 塔坐标/HP/SubType
+    para_conf.txt             → 帧常量/技能槽/怪物ID/射程
+    hero_min_max.txt          → 英雄属性范围
+    vec_soldier_config.txt    → 小兵属性范围
+    vec_feature_organ.txt     → 建筑属性范围
+    vec_feature_monster.txt   → 野怪属性范围+类型
+    map_info.txt              → 地图坐标/视野距离/参考点
+    soldier.txt               → 小兵类型ID
+    hero_main_job.txt         → 英雄职业
+    hero_skill_info.txt       → 技能范围/形状/释放类型/EP消耗
+    skill_ep_consume.txt      → 技能EP消耗
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-### 4.2 分层知识库架构
+### 4.2 LLM-Executor 分离
 
-```
-                    ┌─────────────────────────────┐
-  Level 4:         │     策略技巧集（经验集）      │ ← AI 可学习迭代
-  可学习经验        │  - 针对特定英雄的克制策略      │
-                    │  - 对局中总结的规律性知识      │
-                    │  - 记忆系统提炼               │
-                    ├─────────────────────────────┤
-  Level 3:         │     策略模板集（宏观战术）      │ ← LLM 可参数化微调
-  宏观战术          │  - 推塔序列 / 撤退序列         │
-                    │  - 团战序列 / 发育序列         │
-                    │  - 游走支援序列等              │
-                    ├─────────────────────────────┤
-  Level 2:         │     策略动作集（技能单元）      │
-  基础技能          │  - 控制链 / 爆发连招           │
-                    │  - 逃生序列 / 消耗组合         │
-                    │  - 预定义的技能释放顺序        │
-                    ├─────────────────────────────┤
-  Level 1:         │     硬编码指导集（规则）        │ ← 固定不可调
-  不变规则          │  - 英雄出装推荐               │
-                    │  - 技能加点方案               │
-                    │  - 防御塔/野怪机制            │
-                    └─────────────────────────────┘
-```
-
-### 4.3 提示词引擎设计
-
-#### 4.3.1 System Prompt 结构
-
-参考 TiG 的中文提示模板，包含以下模块：
-
-```
-【盘面理解】英雄信息、发育状态、兵线态势、防御塔状态、视野情况
-【阵容与策略】英雄特点、强势弱势期、风险收益平衡
-【实时动态】局势顺逆、双方动向、资源取舍、战术选择
-【特殊场景】顺风/逆风处理、关键资源抢夺、特殊英雄机制
-```
-
-#### 4.3.2 BPO 优化器集成
-
-- 将 BPO 预训练模型（Llama2-7B-Chat）作为提示重写器
-- 输入当前 System Prompt → 输出优化后的 System Prompt
-- 每轮迭代后评估决策质量 → 决定是否保留优化版
-
-#### 4.3.3 PROMST 风格迭代循环
-
-```
-1. 执行对局 (TaskLLM + 当前 System Prompt)
-2. 采集失败案例
-3. SumLLM 分析错误模式（语法错误、策略误判、死循环等）
-4. GenLLM 生成改进后的 System Prompt
-5. Longformer 评分模型预筛选（可选）
-6. 进入下一轮验证
-```
-
-#### 4.3.4 与记忆系统的协作
-
-- **决策前**：从记忆系统检索 top-k 相关经验 → 注入提示词作为额外上下文
-- **决策后**：将完整轨迹写入情景缓冲区 → 触发赛后反思
-- **原则**："先检索后推理"
-
-### 4.4 策略执行与底层控制
-
-#### 4.4.1 宏观策略 → 6-tuple 映射
-
-LLM 输出的策略决策（如"撤退"）映射为：
-
-| 策略 | 按钮 | 动作序列 |
-|------|------|----------|
-| 撤退 | Move (2) | 向己方防御塔方向 A* 寻路 |
-| 进攻 | Attack (3) | 接近敌方 → 普攻/技能 |
-| 技能1 | Skill1 (4) | 面向目标 → 释放 → 后摇取消 |
-| 连招A | Skill1→Skill2→Skill3 | 控制起手→伤害→收割 |
-
-#### 4.4.2 寻路算法
-
-使用 A* 算法进行路径规划：
-- 输入：当前位置、目标位置、障碍物地图
-- 输出：最优路径点序列
-- 约束：避开防御塔射程、野怪营地
-
-#### 4.4.3 双系统分工
-
-| 系统 | 频率 | 决策内容 | 实现 |
+| 层级 | 频率 | 决策内容 | 实现 |
 |------|------|----------|------|
-| LLM 决策 | 每 5-10 帧 | 宏观策略、目标选择 | deepseek-v4-flash API |
-| 算法执行 | 每帧 | 走位、技能释放、普攻 | Python 代码 |
+| LLM 决策 | 每帧（≈30Hz） | 宏观策略 + WhatIf 分析 + 技能选择 | `macro_agent.py` → deepseek-v4-flash API |
+| 策略执行 | 每帧 | 技能子函数执行、走位、技能释放 | `strategy_executor.py` + `skills_concrete.py` |
 
-### 4.5 记忆系统设计
+**核心分工：**
+- LLM 只输出 `@SKILL_CALL <SKILL>.<func>()`，不操作底层按钮
+- 执行器将每个子函数转换为合法的 6-tuple 动作
+- LLM 不知道 6-tuple 格式，只知道技能文档
 
-#### 4.5.1 三层存储架构
+### 4.3 技能系统
 
-| 层级 | 存储内容 | 生命周期 | 容量限制 | 参考来源 |
-|------|----------|----------|----------|----------|
-| 情景缓冲区 | 当前对局的完整状态-动作-奖励轨迹 | 单局 | 上下文窗口 | Reflexion |
-| 技能库 | 已验证成功的策略模板和技巧条目 | 跨对局持久 | 分层索引 | Voyager |
-| 经验集 | 历史对局提炼的归纳性知识 | 跨对局持久 | 按重要性筛选 | Reflexion |
+两套并行注册表：
 
-#### 4.5.2 协作流程
+| 注册表 | 位置 | 数量 | 用途 |
+|--------|------|------|------|
+| MACRO SKILLS | `skill_base.SKILL_REGISTRY` | 3 (FARM/POKE/ALL_IN) | LLM 可调用，文档注入 SYS |
+| CONCRETE SKILLS | `skills_concrete.SKILL_REGISTRY` | 11 | 执行器内部使用 |
 
-```
-LLM 决策前:
-  1. 情景缓冲区 → 提取当前对局上下文
-  2. 技能库 → 检索匹配的策略模板
-  3. 经验集 → 检索历史经验（针对当前英雄/对手）
-  4. 合并 → 注入提示词
-
-LLM 决策后:
-  1. 记录决策和结果 → 写入情景缓冲区
-  2. 赛后反思 → 更新技能库和经验集
-```
-
-#### 4.5.3 与提示词引擎的接口
-
+**MACRO SKILL 设计：**
 ```python
-# 接口定义（用于协作）
-class MemoryInterface:
-    def retrieve(self, game_state, k=3) -> list[Memory]:
-        """检索最相关的 k 条记忆"""
-    def update(self, trajectory, reward):
-        """根据对局结果更新记忆"""
-    def reflect(self, failed_trajectory) -> Insight:
-        """赛后反思，生成经验"""
+@register_skill
+class FARM(Skill):
+    name = "FARM"
+    description = "..."
+    when = "..."
+    until = "..."
+
+    def func_last_hit(self, ctx):
+        if in_range:
+            return {"action": "last_hit", "status": "success", "detail": "..."}
+        return {"action": "move_to_lane", "status": "no_target", "detail": "..."}
+```
+- 子函数返回结构化 dict（`{action, status, detail, ...}`）
+- 文档通过 `get_doc()` 自动生成并注入 SYS 的 MACRO SKILLS 节
+- LLM 无需 `@SKILL_OPEN`——所有文档已在 SYS 中
+
+### 4.4 提示词引擎设计
+
+#### 4.4.1 System Prompt（固定模板 + 运行时注入）
+
+```
+You control {self_name}({self_type}) vs {enemy_name}({enemy_type}) in Honor of Kings 1v1.
+
+=== GAME RULES ===
+--- GAME MODE ---     游戏模式/技能槽/冷却范围 (gamecore)
+--- MAP CONFIG ---    地图坐标/视野/参考点 (map_info.txt)
+--- HERO STAT RANGES --- 属性范围 (hero_min_max.txt)
+--- STRUCTURES ---    塔坐标/HP/ConfigID (simulator JSON)
+--- SOLDIERS ---      小兵类型/属性 (soldier.txt)
+--- MONSTERS ---      野怪类型/属性 (vec_feature_monster.txt)
+--- KEY TIMING ---    帧常量 (para_conf.txt)
+--- SPRING ---        泉水位置 (para_conf.txt)
+--- HERO INFO ---     {hero_info} 双方英雄技能数据 (gamecore_data.py)
+
+=== MACRO SKILLS ===  {skilldoc} 技能文档注入
+
+=== PROTOCOL ===      <think>+<action> 格式 + FEW-SHOT
+```
+
+#### 4.4.2 User Prompt（每帧动态构造）
+
+```
+=== MEMORY (last N calls) ===
+[Call N | Frame n | T+t] State: ... <think>...</think> <action>...</action>
+
+=== FRAME n (T+ts) ===
+--- HEROES --- [SELF] HP/EP/Gold ATK/DEF/Range SkillCD
+--- TOWERS --- 双方6座建筑
+--- MINIONS --- 数量+阵营
+--- MONSTERS --- 数量
+--- LEGAL ACTIONS --- 可用按钮
+--- DISTANCES --- 到敌方/塔/兵
+
+=== STATE CHANGES === (对比10帧前)
+  SELF: HP差/Gold差
+  RED outer: 塔HP差
+
+=== LAST RESULTS ===
+  @SKILL_CALL FARM.last_hit() → structured dict
+```
+
+#### 4.4.3 关键设计决策
+
+1. **取消 @TOOL**：所有游戏状态通过 state_parser 直接注入 USER PROMPT，LLM 无需查询
+2. **取消 @SKILL_OPEN**：技能文档直接注入 SYS，LLM 直接调用
+3. **结构化 SKILL 返回**：子函数返回 dict，LAST RESULTS 多行展示
+4. **MEMORY 滚动窗口**：保留最近 100 次调用的完整 thought + action，每次显示调用时间
+5. **STATE CHANGES 快照**：每 10 帧对比 protobuf 快照，展示累积变化
+6. **游戏时间显示**：每帧显示 `(T+ts)`，基于 `frame * 0.033`
+7. **技能冷却**：从 `hero.skill[i].cooldown / cooldown_max` 读取，显示剩余/最大值
+
+### 4.5 数据来源规范
+
+所有 SYS 数据必须来自 `gamecore/` 目录下的配置文件，禁止使用 `src/` 代码中的数据。`gamecore_data.py` 模块负责读取 gamecore 配置文件并提供查询接口。
+
+```
+gamecore/ 路径 (开发环境):
+  gamecore/gamecore/core_assets/customresources/ailab/ai_config/1v1/
+
+Docker 环境:
+  AILab/ai_config/1v1/  (after AILab setup)
+  或 /hok_env/hok/hok1v1/core_assets/customresources/ailab/ai_config/1v1/
 ```
 
 ### 4.6 可视化与回放
 
-- **Web 实时面板**：`src/web_demo.py` + `src/web/index.html`（FastAPI + WebSocket）
-  - 实时显示游戏状态（双方血量、位置、经济）
-  - LLM 决策过程（推理文本 + 最终动作）
-  - 历史帧回放
-- **ABSTool 回放**：对 gamecore 生成的 `.abs` 文件进行 Unity 渲染
+- **轨迹回放浏览器**：`trajectories/serve.py` + `trajectories/index.html`
+  - 文件列表 → 选择 JSONL → 浏览各帧 SYS/IN(USER msg)/OUT(LLM reply)/RES(parsed_results)
+  - 搜索、过滤、展开/折叠
+  - 支持两种日志格式（trajectory.py 标准格式 + macro_agent 格式）
+- **Web 实时面板**：`src/web_demo.py` (v1) / `src/web_demo_v2.py` (v2)
+- **ABSTool 回放**：`.abs` Unity 回放渲染器
 
 ---
 
@@ -519,33 +535,49 @@ class MemoryInterface:
 
 | 文件 | 功能 | 状态 |
 |------|------|------|
-| `src/mock_env.py` | 模拟环境（纯 Python） | ✅ 可用 |
-| `src/agent.py` | JSON 决策 Agent（qwen-plus） | ✅ 可用 |
-| `src/react_agent.py` | ReAct 多步工具调用 Agent | ✅ 可用 |
-| `src/state_parser.py` | 游戏状态→文本（含 FOW） | ✅ 可用 |
-| `src/tool_set.py` | 查询工具集 | ✅ 可用 |
-| `src/hero_db.py` | 44 英雄数据库 | ✅ 可用 |
+| `src/macro_agent.py` | **主 Agent** — SYS/USER prompt, `<think>+<action>` 协议 | ✅ 核心 |
+| `src/state_parser.py` | protobuf → 完整状态文本（含 FOW/塔/兵/野/CD） | ✅ 核心 |
+| `src/gamecore_data.py` | gamecore 配置文件读取（hero/skill/role） | ✅ 核心 |
+| `src/strategy_executor.py` | `@SKILL_CALL` 解析 → 6-tuple 执行 | ✅ 核心 |
+| `src/skill_base.py` | Skill 基类 + `SKILL_REGISTRY` | ✅ 核心 |
+| `src/skills/farm.py` | FARM skill（last_hit/move_to_lane/retreat_to_tower） | ✅ 核心 |
+| `src/skills/poke.py` | POKE skill（aim_skill/basic_attack/reposition_back） | ✅ 核心 |
+| `src/skills/all_in.py` | ALL_IN skill（combo_start/basic_attack/chase） | ✅ 核心 |
+| `src/skills/__init__.py` | 自动发现装饰器注册的技能 | ✅ 核心 |
+| `src/skills_concrete.py` | 11 个具体技能实现（执行器内部使用） | ✅ 可用 |
+| `src/hero_db.py` | hero_name() 映射 | ✅ 可用 |
 | `src/protocol.py` | 协议格式定义 | ⚠️ 需修复（断链引用） |
-| `src/text_adapter.py` | 文本适配（含 HERO_NAMES） | ✅ 可用 |
-| `src/web_demo.py` | Web 可视化后端（FastAPI :13187） | ✅ 可用 |
-| `src/web/index.html` | Web 前端面板 | ✅ 可用 |
-| `src/main.py` | Gamecore 对接主程序 | ✅ 可用 |
-| `src/test_*.py` | 多套测试脚本 | ✅ 可用 |
+| `src/text_adapter.py` | **弃用** — 导入缺失符号，运行会崩溃 | ❌ BROKEN |
+| `src/mock_env.py` | MockEnv v1（5 英雄模板） | ✅ 可用 |
+| `src/mock_env_v2.py` | MockEnv v2（含伤害/装备/兵线/塔/FOW） | ✅ 可用 |
+| `src/agent.py` | JSON 决策 Agent（qwen-plus 硬编码） | ⚠️ 旧方案 |
+| `src/react_agent.py` | ReAct 多步工具调用 Agent | ⚠️ 旧方案 |
+| `src/main.py` | Gamecore 对接（deepseek-v4-flash 硬编码） | ✅ 可用 |
+| `src/main_macro.py` | MacroAgent + Gamecore | ✅ 可用 |
+| `src/web_demo.py` | Web v1（FastAPI :13187） | ✅ 可用 |
+| `src/web_demo_v2.py` | Web v2（MockEnvV2 :13188） | ✅ 可用 |
+| `src/trajectory.py` | JSONL 轨迹记录 | ✅ 可用 |
+| `trajectories/serve.py` | 轨迹回放浏览器 | ✅ 可用 |
+| `trajectories/index.html` | 轨迹回放前端 | ✅ 可用 |
 | `gamecore/gamecore/` | 游戏引擎文件 | ✅ 可用 |
-| Docker 部署 | gamecore-server + SDK 容器 | ✅ 可用 |
+| Docker 容器 | gamecore-server + SDK | ✅ 可用 |
 
-### 6.2 基础设施
+### 6.2 已有基础设施
 
 - **.env 配置**：DASHSCOPE_API_KEY + BASE_URL + MODEL_NAME
-- **游戏引擎启动**：后台隐藏进程 `gamecore-server.exe`
-- **Docker 运行**：端口映射、AILab 文件创建
+- **SKILL 注册机制**：`@register_skill` 装饰器 + `skills/__init__.py` 自动发现
+- **技能文档注入**：`get_doc()` 自动生成文档 → 注入 SYS 的 MACRO SKILLS 节
+- **轨迹日志**：`TrajectoryLogger` 记录每步 SYS/USER/LLM_reply/parsed_results → JSONL
+- **游戏状态解析**：`parse_state()` 从 protobuf 提取完整盘面 → 结构化文本
+- **状态快照对比**：`compress_state()` 用于 MEMORY 快照，10 帧周期对比用于 STATE CHANGES
+- **游戏引擎启动**：gamecore-server 后台进程 + Docker 容器
 
 ### 6.3 待开发模块
 
 - [ ] 提示词引擎（BPO 集成 + PROMST 迭代）
-- [ ] 分层知识库（四层结构实现）
-- [ ] 记忆系统（三层存储 + 反思机制）
-- [ ] 策略执行模块（A* 寻路 + 技能组合映射）
+- [ ] 四层分层知识库（当前只有两层：gamecore 规则 + macro skills）
+- [ ] 记忆系统（三层存储 + 反思机制，当前只有滑动窗口）
+- [ ] 策略执行层完善（skill 调用结果与 step() 动作的断链修复）
 
 ---
 

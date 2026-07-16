@@ -1,5 +1,4 @@
 import math, re
-from tools import TOOL_REGISTRY, execute_tool
 from skill_base import SKILL_REGISTRY
 import skills
 
@@ -108,29 +107,6 @@ class ProtocolExecutor:
         for line in lines:
             line = line.strip()
             if not line or line.startswith("Thought") or line.startswith("WhatIf"):
-                continue
-
-            m = re.match(r"@TOOL\s+(\w+)\(([^)]*)\)", line)
-            if m:
-                name, params_str = m.group(1), m.group(2)
-                params = {}
-                for p in params_str.split(","):
-                    if "=" in p:
-                        k, v = p.split("=", 1)
-                        params[k.strip()] = v.strip()
-                info["_self_id"] = self.ctx.sh
-                result = execute_tool(name, info, **params)
-                results.append({"type": "tool", "name": name, "result": result})
-                continue
-
-            m = re.match(r"@SKILL_OPEN\s+(\w+)", line)
-            if m:
-                sk_name = m.group(1)
-                sk = SKILL_REGISTRY.get(sk_name)
-                if sk:
-                    results.append({"type": "skill_open", "name": sk_name, "doc": sk.get_doc()})
-                else:
-                    results.append({"type": "error", "msg": f"unknown skill: {sk_name}"})
                 continue
 
             m = re.match(r"@SKILL_CALL\s+(\w+)\.(\w+)\(([^)]*)\)", line)

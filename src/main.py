@@ -29,8 +29,8 @@ from openai import OpenAI
 from hero_db import hero_name
 
 API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
-BASE_URL = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-MODEL = "deepseek-v4-flash"
+BASE_URL = os.environ.get("DASHSCOPE_BASE_URL", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
+MODEL = os.environ.get("MODEL_NAME", "deepseek-v4-flash")
 client = OpenAI(api_key=API_KEY, base_url=BASE_URL) if API_KEY else None
 
 HERO_AI = 199  # 公孙离 (LLM controls)
