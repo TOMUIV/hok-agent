@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<title>HOK MockEnv V2</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a12;color:#ddd;font-family:'Microsoft YaHei','Segoe UI',sans-serif;overflow:hidden;height:100vh;width:100vw;user-select:none}
+#app{display:flex;flex-direction:column;height:100vh;width:100vw}
+.top-bar{display:flex;align-items:center;justify-content:space-between;padding:6px 16px;background:linear-gradient(135deg,#1a1a2e,#16213e);border-bottom:1px solid #2a2a4a;height:48px;flex-shrink:0}
+.top-bar .team-info{display:flex;align-items:center;gap:12px}
+.top-bar .team-blue{color:#4fc3f7;font-weight:bold;font-size:14px}
+.top-bar .team-red{color:#ef5350;font-weight:bold;font-size:14px}
+.top-bar .kda{font-size:13px;color:#aaa}
+.top-bar .timer{font-size:18px;font-weight:bold;color:#ffd54f;font-variant-numeric:tabular-nums}
+.main-area{display:flex;flex:1;min-height:0}
+.left-panel{width:240px;background:#12121e;border-right:1px solid #2a2a4a;display:flex;flex-direction:column;flex-shrink:0}
+.center-panel{flex:1;display:flex;flex-direction:column;min-width:0}
+.right-panel{width:240px;background:#12121e;border-left:1px solid #2a2a4a;display:flex;flex-direction:column;flex-shrink:0}
+.map-container{flex:1;min-height:0;position:relative;background:#0d0d1a}
+.map-container canvas{width:100%;height:100%;display:block}
+.log-container{height:160px;background#0d0d1a;border-top:1px solid #2a2a4a;overflow-y:auto;padding:6px 10px;flex-shrink:0;font-size:12px;line-height:1.5}
+.log-container .log-entry{padding:2px 0;border-bottom:1px solid #1a1a2e}
+.log-entry .t{color:#888}
+.log-entry .msg{color:#ccc}
+.log-entry .dmg{color:#ff7043}
+.log-entry .kill{color:#ff1744;font-weight:bold}
+.log-entry .tower{color:#ffab40}
+.log-entry .levelup{color:#69f0ae}
+.log-entry .heal{color:#40c4ff}
+.hero-panel{padding:10px 12px;flex-shrink:0}
+.hero-panel .hero-name{font-size:14px;font-weight:bold;margin-bottom:4px}
+.hero-panel .hero-name.blue{color:#4fc3f7}
+.hero-panel .hero-name.red{color:#ef5350}
+.hp-bar,.ep-bar{height:10px;border-radius:4px;margin:2px 0;position:relative;overflow:hidden;background:#1a1a2e}
+.hp-bar .fill{height:100%;transition:width .3s;border-radius:4px}
+.hp-bar .fill.green{background:linear-gradient(90deg,#4caf50,#81c784)}
+.hp-bar .fill.red{background:linear-gradient(90deg,#f44336,#ef5350)}
+.ep-bar .fill{height:100%;transition:width .3s;border-radius:4px}
+.ep-bar .fill.blue{background:linear-gradient(90deg,#1565c0,#42a5f5)}
+.ep-bar .fill.purple{background:linear-gradient(90deg,#7b1fa2,#ab47bc)}
+.hp-text,.ep-text{font-size:10px;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;text-shadow:0 0 3px #000;white-space:nowrap}
+.stats-row{display:flex;gap:8px;font-size:11px;color:#999;margin:4px 0;flex-wrap:wrap}
+.stats-row span{white-space:nowrap}
+.skills-panel{padding:6px 12px;display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0}
+.skill-btn{width:46px;height:46px;border-radius:6px;border:2px solid #333;background:#1a1a2e;position:relative;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;color:#aaa;transition:all .2s}
+.skill-btn.active{border-color:#4fc3f7;background:#1a2a3e}
+.skill-btn.on-cooldown{opacity:.5}
+.skill-btn .cd-overlay{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;color:#ff5252;border-radius:4px}
+.skill-btn .key-hint{position:absolute;bottom:1px;right:3px;font-size:8px;color:#666}
+.skill-btn .skill-level{position:absolute;top:1px;left:3px;font-size:8px;color:#ffd54f}
+.equip-panel{padding:4px 12px;display:flex;gap:4px;flex-wrap:wrap;flex-shrink:0}
+.equip-slot{width:32px;height:32px;border-radius:4px;border:1px solid #333;background:#0d0d1a;display:flex;align-items:center;justify-content:center;font-size:7px;color:#888;position:relative}
+.equip-slot.has-item{background:#1a2a1a;border-color:#4caf50}
+.equip-slot .eqp-name{font-size:7px;color:#8bc34a;text-align:center;line-height:1.1}
+.shop-btn{padding:6px 12px;margin:6px 12px;background:linear-gradient(135deg,#ff6f00,#ff8f00);border:none;border-radius:4px;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;flex-shrink:0;transition:all .2s}
+.shop-btn:hover{background:linear-gradient(135deg,#ff8f00,#ffa000)}
+.shop-btn .gold{font-size:10px;color:#ffd54f}
+.modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.7);z-index:1000;align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal{background:#1a1a2e;border-radius:12px;border:1px solid #333;padding:20px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto}
+.modal h3{color:#ffd54f;margin-bottom:12px}
+.shop-item{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-bottom:1px solid #2a2a4a;cursor:pointer;transition:background .2s}
+.shop-item:hover{background:#2a2a4a}
+.shop-item .item-info{display:flex;flex-direction:column;gap:2px}
+.shop-item .item-name{font-size:13px;color:#fff}
+.shop-item .item-stats{font-size:10px;color:#888}
+.shop-item .item-price{font-size:13px;color:#ffd54f;font-weight:bold}
+.action-bar{height:36px;background:#0d0d1a;border-top:1px solid #2a2a4a;display:flex;align-items:center;padding:0 12px;gap:12px;flex-shrink:0;font-size:11px}
+.action-bar .action-label{color:#888}
+.action-bar .action-val{color:#4fc3f7}
+.action-bar .llm-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#aaa}
+.bottom-bar{height:32px;background#0d0d1a;border-top:1px solid #2a2a4a;display:flex;align-items:center;padding:0 12px;gap:8px;flex-shrink:0;font-size:11px}
+.bottom-bar label{color:#888}
+.bottom-bar input[type=range]{width:80px;accent-color:#4fc3f7}
+.status-bar{height:24px;background:#0a0a12;border-top:1px solid #1a1a2e;display:flex;align-items:center;padding:0 12px;font-size:10px;color:#666;gap:12px;flex-shrink:0}
+.scrollable{overflow-y:auto;flex:1;min-height:0}
+.scrollable::-webkit-scrollbar{width:4px}
+.scrollable::-webkit-scrollbar-thumb{background:#333;border-radius:2px}
+.gameover-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.8);z-index:999;align-items:center;justify-content:center;flex-direction:column}
+.gameover-overlay.show{display:flex}
+.gameover-overlay h1{font-size:48px;margin-bottom:10px}
+.gameover-overlay .sub{font-size:18px;color:#aaa}
+.gameover-overlay .btn-restart{padding:10px 30px;margin-top:20px;background:linear-gradient(135deg,#ff6f00,#ff8f00);border:none;border-radius:6px;color:#fff;font-size:16px;cursor:pointer}
+.gameover-overlay .btn-restart:hover{background:linear-gradient(135deg,#ff8f00,#ffa000}
+.gameover-overlay .winner-blue{color:#4fc3f7}
+.gameover-overlay .winner-red{color:#ef5350}
+.gameover-overlay .winner-tie{color:#ffd54f}
+.stat-detail{font-size:10px;color:#777;margin:2px 0;display:flex;gap:6px;flex-wrap:wrap}
+.stat-detail span{background#1a1a2e;padding:1px 6px;border-radius:3px}
+.start-btn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:16px 40px;background:linear-gradient(135deg,#4fc3f7,#1565c0);border:none;border-radius:8px;color:#fff;font-size:18px;font-weight:bold;cursor:pointer;z-index:10;box-shadow:0 0 30px rgba(79,195,247,.3)}
+.start-btn:hover{box-shadow:0 0 40px rgba(79,195,247,.5)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="top-bar">
+    <div class="team-info">
+      <span class="team-blue" id="blue-team-name">蓝方</span>
+      <span class="kda" id="blue-kda">0/0/0</span>
+      <span style="color:#888">|</span>
+      <span style="color:#ffd54f;font-size:13px" id="blue-gold">300</span>
+      <span style="color:#888;font-size:11px">G</span>
+    </div>
+    <div class="timer" id="game-timer">00:00</div>
+    <div class="team-info">
+      <span style="color:#ffd54f;font-size:13px" id="red-gold">300</span>
+      <span style="color:#888;font-size:11px">G</span>
+      <span style="color:#888">|</span>
+      <span class="kda" id="red-kda">0/0/0</span>
+      <span class="team-red" id="red-team-name">红方</span>
+    </div>
+  </div>
+
+  <div class="main-area">
+    <div class="left-panel">
+      <div class="hero-panel">
+        <div class="hero-name blue" id="blue-hero-name">英雄</div>
+        <div class="hp-bar"><div class="fill green" id="blue-hp-bar" style="width:100%"></div><div class="hp-text" id="blue-hp-text">3500/3500</div></div>
+        <div class="ep-bar"><div class="fill blue" id="blue-ep-bar" style="width:100%"></div><div class="ep-text" id="blue-ep-text">200/200</div></div>
+        <div class="stats-row" id="blue-stats"></div>
+        <div class="stat-detail" id="blue-detail"></div>
+      </div>
+      <div style="border-top:1px solid #2a2a4a"></div>
+      <div class="hero-panel">
+        <div class="hero-name red" id="red-hero-name">敌方</div>
+        <div class="hp-bar"><div class="fill red" id="red-hp-bar" style="width:100%"></div><div class="hp-text" id="red-hp-text">3200/3200</div></div>
+        <div class="ep-bar"><div class="fill purple" id="red-ep-bar" style="width:100%"></div><div class="ep-text" id="red-ep-text">0/0</div></div>
+        <div class="stats-row" id="red-stats"></div>
+        <div class="stat-detail" id="red-detail"></div>
+      </div>
+      <div style="border-top:1px solid #2a2a4a;flex-shrink:0"></div>
+      <div class="scrollable" style="flex:1">
+        <div style="padding:6px 12px;font-size:11px;color:#888;font-weight:bold">技能</div>
+        <div class="skills-panel" id="blue-skills"></div>
+        <div style="padding:4px 12px;font-size:11px;color:#888;font-weight:bold;margin-top:4px">装备</div>
+        <div class="equip-panel" id="blue-equip"></div>
+        <button class="shop-btn" onclick="toggleShop()">商店 <span class="gold" id="shop-gold">300G</span></button>
+        <div style="padding:4px 12px;font-size:11px;color:#888;font-weight:bold;margin-top:4px">敌方装备</div>
+        <div class="equip-panel" id="red-equip"></div>
+        <div style="padding:4px 12px;font-size:11px;color:#888;font-weight:bold;margin-top:4px">敌方技能</div>
+        <div class="skills-panel" id="red-skills"></div>
+      </div>
+    </div>
+
+    <div class="center-panel">
+      <div class="map-container" id="map-container">
+        <canvas id="minimap"></canvas>
+        <button class="start-btn" id="start-btn" onclick="startGame()">开始对局</button>
+      </div>
+      <div class="log-container" id="log-container">
+        <div style="color:#666;font-size:11px">等待开始...</div>
+      </div>
+    </div>
+
+    <div class="right-panel">
+      <div style="padding:8px 12px;font-size:11px;color:#888;font-weight:bold">防御塔</div>
+      <div id="organ-panel" style="padding:2px 12px;flex-shrink:0"></div>
+      <div style="padding:8px 12px;font-size:11px;color:#888;font-weight:bold;margin-top:8px">对局信息</div>
+      <div class="scrollable" style="flex:1;padding:0 12px">
+        <div id="game-info" style="font-size:11px;color:#999;line-height:1.6"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="action-bar">
+    <span class="action-label">动作:</span>
+    <span class="action-val" id="action-display">等待</span>
+    <span class="action-label" style="margin-left:12px">帧:</span>
+    <span class="action-val" id="frame-display">0</span>
+    <span class="action-label" style="margin-left:12px">LLM:</span>
+    <span class="llm-text" id="llm-text">-</span>
+  </div>
+
+  <div class="bottom-bar">
+    <label>速度</label>
+    <input type="range" id="speed-control" min="1" max="10" value="5" step="1">
+    <span id="speed-label" style="color:#888">1x</span>
+    <span style="color:#888">|</span>
+    <label>小兵: <span id="soldier-count" style="color:#4fc3f7">0</span></label>
+    <label style="margin-left:8px">事件: <span id="event-count" style="color:#ffd54f">0</span></label>
+    <button onclick="stopGame()" style="margin-left:auto;padding:3px 12px;background:#f44336;border:none;border-radius:3px;color:#fff;font-size:10px;cursor:pointer">停止</button>
+    <button onclick="startGame()" style="padding:3px 12px;background:#4caf50;border:none;border-radius:3px;color:#fff;font-size:10px;cursor:pointer">重新开始</button>
+  </div>
+
+  <div class="status-bar">
+    <span id="ws-status">⛔ 未连接</span>
+    <span id="fps-display">0 FPS</span>
+    <span id="hero-status">等待开始</span>
+  </div>
+</div>
+
+<div class="modal-overlay" id="shop-modal">
+  <div class="modal">
+    <h3>商店 <span style="font-size:12px;color:#ffd54f" id="modal-gold">300G</span></h3>
+    <div id="shop-items"></div>
+    <button onclick="toggleShop()" style="margin-top:12px;padding:6px 20px;background:#333;border:none;border-radius:4px;color:#fff;cursor:pointer">关闭</button>
+  </div>
+</div>
+
+<div class="gameover-overlay" id="gameover-overlay">
+  <h1 id="gameover-title">对局结束</h1>
+  <div class="sub" id="gameover-sub">结果</div>
+  <div class="sub" id="gameover-reason" style="font-size:14px;color:#aaa;margin-top:6px"></div>
+  <button class="btn-restart" onclick="startGame()">重新开始</button>
+</div>
+
+<script>
+let ws = null;
+let canvas, ctx;
+let mapAnimId = null;
+let gameRunning = false;
+let frameData = null;
+let lastFrameTime = 0;
+let fpsCount = 0;
+let fpsTime = 0;
+let currentFps = 0;
+const MAP_X_MIN = -40000, MAP_X_MAX = 40000;
+const MAP_Z_MIN = -40000, MAP_Z_MAX = 40000;
+const MAP_W = MAP_X_MAX - MAP_X_MIN; // 80000
+const MAP_H = MAP_Z_MAX - MAP_Z_MIN; // 80000
+
+const SUBTYPE_NAMES = {21: '外塔', 23: '内塔', 24: '水晶'};
+const BUTTON_NAMES = ['无','无','移动','攻击','技能1','技能2','技能3','治疗','召唤师','回城','技能4','装备'];
+const DIR_NAMES = {2:'移动',3:'攻击',4:'技能1',5:'技能2',6:'技能3',9:'回城'};
+
+function initCanvas() {
+  canvas = document.getElementById('minimap');
+  ctx = canvas.getContext('2d');
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+  drawMapPlaceholder();
+}
+
+function resizeCanvas() {
+  const container = document.getElementById('map-container');
+  canvas.width = container.clientWidth;
+  canvas.height = container.clientHeight;
+  if (frameData) drawFrame(frameData);
+  else drawMapPlaceholder();
+}
+
+function drawMapPlaceholder() {
+  if (!ctx) return;
+  const w = canvas.width, h = canvas.height;
+  ctx.fillStyle = '#0d0d1a';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#333';
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('等待对局开始...', w/2, h/2);
+}
+
+function worldToMap(wx, wz, w, h) {
+  const pad = 20;
+  const aw = w - pad * 2, ah = h - pad * 2;
+  const nx = (wx - MAP_X_MIN) / MAP_W;
+  const nz = (wz - MAP_Z_MIN) / MAP_H;
+  return {
+    x: pad + nx * aw,
+    y: pad + nz * ah
+  };
+}
+
+function drawFrame(data) {
+  if (!ctx || !data) return;
+  frameData = data;
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  // Background
+  const grad = ctx.createLinearGradient(0,0,w,h);
+  grad.addColorStop(0, '#1a2332');
+  grad.addColorStop(0.5, '#0d1a1a');
+  grad.addColorStop(1, '#2a1a1a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Lane
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 12;
+  ctx.beginPath();
+  const p1 = worldToMap(-19780, -19780, w, h);
+  const p2 = worldToMap(19820, 19820, w, h);
+  ctx.moveTo(p1.x, p1.y);
+  ctx.lineTo(p2.x, p2.y);
+  ctx.stroke();
+
+  // Grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 8; i++) {
+    const t = i / 8;
+    const px = 20 + t * (w - 40);
+    ctx.beginPath(); ctx.moveTo(px, 20); ctx.lineTo(px, h - 20); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(20, 20 + t * (h - 40)); ctx.lineTo(w - 20, 20 + t * (h - 40)); ctx.stroke();
+  }
+
+  // Organs (towers + crystals)
+  if (data.organs) {
+    for (const o of data.organs) {
+      if (!o.alive) continue;
+      const p = worldToMap(o.x, o.z, w, h);
+      const size = o.SubType === 24 ? 8 : 6;
+      const color = o.Camp === 0 ? '#4fc3f7' : '#ef5350';
+      ctx.fillStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = size * 2;
+      if (o.SubType === 24) {
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y - size);
+        ctx.lineTo(p.x + size, p.y + size);
+        ctx.lineTo(p.x - size, p.y + size);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillRect(p.x - size/2, p.y - size/2, size, size);
+      }
+      ctx.shadowBlur = 0;
+
+      // HP bar
+      const hpPct = o.Hp / o.MaxHp;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(p.x - 8, p.y - size - 4, 16, 3);
+      ctx.fillStyle = hpPct > 0.5 ? '#4caf50' : hpPct > 0.25 ? '#ff9800' : '#f44336';
+      ctx.fillRect(p.x - 8, p.y - size - 4, 16 * hpPct, 3);
+    }
+  }
+
+  // Soldiers
+  if (data.soldiers) {
+    for (const s of data.soldiers) {
+      if (s.hp <= 0) continue;
+      const p = worldToMap(s.x, s.z, w, h);
+      ctx.fillStyle = s.camp === 0 ? 'rgba(79,195,247,0.5)' : 'rgba(239,83,80,0.5)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Heroes
+  if (data.heroes) {
+    for (const hero of data.heroes) {
+      const p = worldToMap(hero.x, hero.z, w, canvas.height);
+      const radius = 10;
+      const isAlly = hero.camp === 0;
+      const color = isAlly ? '#4fc3f7' : '#ef5350';
+      const glow = isAlly ? 'rgba(79,195,247,0.3)' : 'rgba(239,83,80,0.3)';
+
+      if (hero.alive) {
+        ctx.shadowColor = glow;
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 8px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(hero.level, p.x, p.y + 3);
+
+        // Name
+        ctx.fillStyle = color;
+        ctx.font = '10px sans-serif';
+        ctx.fillText(hero.name, p.x, p.y - radius - 6);
+
+        // HP bar
+        const hpPct = hero.hp / hero.max_hp;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(p.x - 12, p.y - radius - 14, 24, 3);
+        ctx.fillStyle = hpPct > 0.5 ? '#4caf50' : hpPct > 0.25 ? '#ff9800' : '#f44336';
+        ctx.fillRect(p.x - 12, p.y - radius - 14, 24 * hpPct, 3);
+      } else {
+        ctx.fillStyle = 'rgba(100,100,100,0.4)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#666';
+        ctx.font = '8px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('阵亡', p.x, p.y + 3);
+      }
+    }
+  }
+
+  // FOW overlay on enemy side
+  const fog = ctx.createRadialGradient(
+    p1.x, p1.y, 0,
+    p1.x, p1.y, Math.min(w, h) * 0.35
+  );
+  fog.addColorStop(0, 'rgba(0,0,0,0)');
+  fog.addColorStop(1, 'rgba(0,0,0,0.2)');
+  ctx.fillStyle = fog;
+  ctx.fillRect(0, 0, w, h);
+
+  // Labels
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  ctx.font = '8px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('蓝方基地', 20, h - 10);
+  ctx.textAlign = 'right';
+  ctx.fillText('红方基地', w - 20, 10);
+}
+
+function updateUI(data) {
+  if (!data || !data.heroes) return;
+
+  const blue = data.heroes.find(h => h.camp === 0);
+  const red = data.heroes.find(h => h.camp === 1);
+  if (!blue || !red) return;
+
+  // Top bar
+  document.getElementById('blue-team-name').textContent = blue.name;
+  document.getElementById('blue-kda').textContent = `${blue.killCnt}/${blue.deadCnt}/${blue.assistCnt}`;
+  document.getElementById('blue-gold').textContent = Math.round(blue.money);
+  document.getElementById('red-team-name').textContent = red.name;
+  document.getElementById('red-kda').textContent = `${red.killCnt}/${red.deadCnt}/${red.assistCnt}`;
+  document.getElementById('red-gold').textContent = Math.round(red.money);
+
+  // Timer
+  const t = data.frame * 0.1;
+  const mins = Math.floor(t / 60);
+  const secs = Math.floor(t % 60);
+  document.getElementById('game-timer').textContent = `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+
+  // Blue HP
+  document.getElementById('blue-hp-bar').style.width = `${(blue.hp / blue.max_hp) * 100}%`;
+  document.getElementById('blue-hp-text').textContent = `${Math.round(blue.hp)}/${blue.max_hp}`;
+  document.getElementById('blue-ep-bar').style.width = `${(blue.ep / blue.max_ep) * 100}%`;
+  document.getElementById('blue-ep-text').textContent = `${Math.round(blue.ep)}/${blue.max_ep}`;
+  document.getElementById('blue-stats').innerHTML =
+    `<span>⚔ ${blue.phy_atk}</span><span>🛡 ${blue.phy_def}</span><span>✨ ${blue.mgc_atk}</span>` +
+    `<span>💨 ${blue.mov_spd}</span><span>⭐ ${blue.crit_rate}%</span>`;
+  document.getElementById('blue-detail').innerHTML =
+    `<span>等级 ${blue.level}</span><span>经验 ${Math.round(blue.exp)}/${blue.exp_next}</span>` +
+    `<span>攻速 ${blue.atk_spd.toFixed(2)}</span><span>射程 ${blue.atk_range}</span>`;
+  document.getElementById('blue-hero-name').textContent = `${blue.name} Lv.${blue.level}`;
+
+  // Red HP
+  const redHpPct = (red.hp / red.max_hp) * 100;
+  document.getElementById('red-hp-bar').style.width = `${redHpPct}%`;
+  document.getElementById('red-hp-text').textContent = `${Math.round(red.hp)}/${red.max_hp}`;
+  const redEpPct = red.max_ep > 0 ? (red.ep / red.max_ep) * 100 : 0;
+  document.getElementById('red-ep-bar').style.width = `${redEpPct}%`;
+  document.getElementById('red-ep-text').textContent = red.max_ep > 0 ? `${Math.round(red.ep)}/${red.max_ep}` : '-';
+  document.getElementById('red-stats').innerHTML =
+    `<span>⚔ ${red.phy_atk}</span><span>🛡 ${red.phy_def}</span><span>✨ ${red.mgc_atk}</span>` +
+    `<span>💨 ${red.mov_spd}</span>`;
+  document.getElementById('red-detail').innerHTML =
+    `<span>等级 ${red.level}</span><span>经验 ${Math.round(red.exp)}/${red.exp_next}</span>` +
+    `<span>攻速 ${red.atk_spd.toFixed(2)}</span><span>射程 ${red.atk_range}</span>`;
+  document.getElementById('red-hero-name').textContent = `${red.name} Lv.${red.level}`;
+
+  // Blue skills
+  renderSkills('blue-skills', blue.skills);
+  // Red skills
+  renderSkills('red-skills', red.skills);
+
+  // Blue equipment
+  renderEquip('blue-equip', blue.equipment);
+  // Red equipment
+  renderEquip('red-equip', red.equipment);
+
+  // Shop gold
+  document.getElementById('shop-gold').textContent = `${Math.round(blue.money)}G`;
+  document.getElementById('modal-gold').textContent = `${Math.round(blue.money)}G`;
+
+  // Organs
+  renderOrgans(data.organs);
+
+  // Action display
+  if (data.action) {
+    const a = data.action;
+    const btnName = BUTTON_NAMES[a.button] || `Btn${a.button}`;
+    document.getElementById('action-display').textContent =
+      `${btnName} (${a.move_x-8},${a.move_z-8}) tgt=${a.target}`;
+  }
+  document.getElementById('frame-display').textContent = data.frame;
+  if (data.llm_decision) {
+    document.getElementById('llm-text').textContent = data.llm_decision;
+  }
+
+  // Soldier count
+  if (data.soldiers) {
+    document.getElementById('soldier-count').textContent = data.soldiers.length;
+  }
+
+  // Events
+  if (data.events) {
+    document.getElementById('event-count').textContent = data.events.length;
+    updateLog(data.events);
+  }
+
+  // Game info
+  updateGameInfo(blue, red, data);
+
+  // Status
+  document.getElementById('hero-status').textContent =
+    `${blue.name} HP:${Math.round(blue.hp)}/${blue.max_hp} | ${red.name} HP:${Math.round(red.hp)}/${red.max_hp}`;
+}
+
+function renderSkills(containerId, skills) {
+  const container = document.getElementById(containerId);
+  if (!skills || skills.length === 0) {
+    container.innerHTML = '<div style="color:#555;font-size:10px;padding:4px">无技能数据</div>';
+    return;
+  }
+  const passiveSkill = {name:'被动', level:1, cooldown:0, max_cooldown:0, description:'英雄被动', button_idx:-1};
+  const allSkills = [passiveSkill, ...skills];
+  container.innerHTML = allSkills.map(s => {
+    const isPassive = s.button_idx === -1;
+    const onCd = s.max_cooldown > 0 && s.cooldown > 0;
+    const cdPct = s.max_cooldown > 0 ? (s.cooldown / s.max_cooldown * 100) : 0;
+    const cdText = s.cooldown > 0 ? Math.ceil(s.cooldown) : '';
+    const lvlText = s.level > 0 ? `Lv${s.level}` : '';
+    const cls = isPassive ? '' : (s.level > 0 ? 'active' : '');
+    const cdOverlay = onCd ? `<div class="cd-overlay">${cdText}</div>` : '';
+    return `<div class="skill-btn ${cls}${onCd?' on-cooldown':''}" title="${s.description||''}">
+      ${cdOverlay}
+      <span style="font-size:${isPassive?8:10}px">${s.name}</span>
+      <span class="key-hint">${isPassive?'P':['','','','','Q','W','E','','','','',''][s.button_idx]||''}</span>
+      ${lvlText ? `<span class="skill-level">${lvlText}</span>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function renderEquip(containerId, equipment) {
+  const container = document.getElementById(containerId);
+  if (!equipment || equipment.length === 0) {
+    container.innerHTML = '<div style="color:#555;font-size:10px;padding:4px">空</div>';
+    return;
+  }
+  container.innerHTML = equipment.map(e => {
+    const stats = [];
+    if (e.phy_atk) stats.push(`攻击+${e.phy_atk}`);
+    if (e.mgc_atk) stats.push(`法强+${e.mgc_atk}`);
+    if (e.phy_def) stats.push(`物防+${e.phy_def}`);
+    if (e.mgc_def) stats.push(`魔防+${e.mgc_def}`);
+    if (e.max_hp) stats.push(`生命+${e.max_hp}`);
+    if (e.crit) stats.push(`暴击+${e.crit}%`);
+    if (e.atk_spd) stats.push(`攻速+${e.atk_spd}%`);
+    return `<div class="equip-slot has-item" title="${stats.join(' | ')}">
+      <span class="eqp-name">${e.name}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderOrgans(organs) {
+  const panel = document.getElementById('organ-panel');
+  if (!organs || organs.length === 0) {
+    panel.innerHTML = '<div style="color:#555;font-size:10px">无数据</div>';
+    return;
+  }
+  panel.innerHTML = organs.map(o => {
+    const color = o.alive ? (o.Camp === 0 ? '#4fc3f7' : '#ef5350') : '#555';
+    const hpPct = o.alive ? (o.Hp / o.MaxHp * 100) : 0;
+    const hpColor = hpPct > 50 ? '#4caf50' : hpPct > 25 ? '#ff9800' : '#f44336';
+    return `<div style="display:flex;align-items:center;gap:6px;margin:3px 0;font-size:11px;opacity:${o.alive?1:.4}">
+      <span style="color:${color}">${o.Camp===0?'🔵':'🔴'}</span>
+      <span style="flex:1;color:#ccc">${o.name}</span>
+      <span style="font-size:10px;color:${hpColor}">${o.alive ? `${Math.round(o.Hp)}/${o.MaxHp}` : '摧毁'}</span>
+    </div>`;
+  }).join('');
+}
+
+function updateLog(events) {
+  const log = document.getElementById('log-container');
+  if (!events || events.length === 0) return;
+  const frag = document.createDocumentFragment();
+  const latest = events.slice(-5);
+  for (const e of latest) {
+    if (e._displayed) continue;
+    e._displayed = true;
+    const div = document.createElement('div');
+    div.className = 'log-entry';
+    const time = document.createElement('span');
+    time.className = 't';
+    time.textContent = `[${String(Math.floor((frameData?.frame||0)*0.1)).padStart(2,'0')}s] `;
+    div.appendChild(time);
+    const msg = document.createElement('span');
+    msg.className = 'msg';
+    if (e.type === 'attack') {
+      msg.innerHTML = `<span class="dmg">⚔ ${e.dmg}伤害</span> → ${e.target_type==='hero'?'英雄':e.target_type==='tower'?'防御塔':'小兵'}`;
+    } else if (e.type === 'skill') {
+      msg.innerHTML = `<span class="heal">✨ ${e.skill}</span> <span class="dmg">${e.dmg}伤害</span>`;
+    } else if (e.type === 'hero_death') {
+      msg.innerHTML = `<span class="kill">💀 阵亡</span>`;
+    } else if (e.type === 'tower_destroyed') {
+      msg.innerHTML = `<span class="tower">🏚 ${e.tower} 被摧毁</span>`;
+    } else if (e.type === 'tower_attack') {
+      msg.innerHTML = `<span class="tower">🏹 ${e.tower} ${e.dmg}伤害</span>`;
+    } else if (e.type === 'level_up') {
+      msg.innerHTML = `<span class="levelup">⬆ 升级 Lv.${e.level}</span>`;
+    } else if (e.type === 'recall') {
+      msg.innerHTML = `<span class="heal">🏠 回城</span>`;
+    } else if (e.type === 'respawn') {
+      msg.innerHTML = `<span class="heal">♻ 复活</span>`;
+    } else {
+      msg.textContent = JSON.stringify(e);
+    }
+    div.appendChild(msg);
+    frag.appendChild(div);
+  }
+  if (frag.childNodes.length > 0) {
+    log.insertBefore(frag, log.firstChild);
+    while (log.children.length > 50) log.removeChild(log.lastChild);
+  }
+}
+
+function updateGameInfo(blue, red, data) {
+  const info = document.getElementById('game-info');
+  info.innerHTML = `
+    <div>帧 ${data.frame} / 300</div>
+    <div>⏱ ${String(Math.floor(data.frame*0.1/60)).padStart(2,'0')}:${String(Math.floor(data.frame*0.1%60)).padStart(2,'0')}</div>
+    <div style="margin-top:6px;color:#aaa">${blue.name}</div>
+    <div>KDA ${blue.killCnt}/${blue.deadCnt}/${blue.assistCnt}</div>
+    <div>经济 ${Math.round(blue.money)}</div>
+    <div>伤害 ${Math.round(blue.totalHurtToHero||0)}</div>
+    <div style="margin-top:6px;color:#aaa">${red.name}</div>
+    <div>KDA ${red.killCnt}/${red.deadCnt}/${red.assistCnt}</div>
+    <div>经济 ${Math.round(red.money)}</div>
+    <div>伤害 ${Math.round(red.totalHurtToHero||0)}</div>
+    <div style="margin-top:6px;color:#888">状态</div>
+    <div>${blue.alive ? '✅ 存活' : '💀 阵亡'}</div>
+    <div>${red.alive ? '✅ 存活' : '💀 阵亡'}</div>
+    <div style="margin-top:6px;color:#888">防御塔</div>
+    ${(data.organs||[]).filter(o=>o.Camp===0).map(o=>`<div style="color:${o.alive?'#4fc3f7':'#555'}">${o.name} ${o.alive?'✅':'❌'}</div>`).join('')}
+    ${(data.organs||[]).filter(o=>o.Camp===1).map(o=>`<div style="color:${o.alive?'#ef5350':'#555'}">${o.name} ${o.alive?'✅':'❌'}</div>`).join('')}
+  `;
+}
+
+function showGameOver(winner, reason) {
+  const overlay = document.getElementById('gameover-overlay');
+  overlay.classList.add('show');
+  const title = document.getElementById('gameover-title');
+  const sub = document.getElementById('gameover-sub');
+  const el = document.getElementById('gameover-reason');
+  if (winner === 0) {
+    title.textContent = '🔵 蓝方获胜';
+    title.className = 'winner-blue';
+    sub.textContent = '蓝方阵营获得胜利！';
+  } else if (winner === 1) {
+    title.textContent = '🔴 红方获胜';
+    title.className = 'winner-red';
+    sub.textContent = '红方阵营获得胜利！';
+  } else {
+    title.textContent = '🤝 平局';
+    title.className = 'winner-tie';
+    sub.textContent = '双方不分胜负';
+  }
+  if (reason) {
+    el.textContent = reason;
+  } else if (frameData) {
+    const h0 = frameData.heroes?.[0], h1 = frameData.heroes?.[1];
+    el.textContent = `帧 ${frameData.frame} | 蓝${h0?.killCnt||0}/${h0?.deadCnt||0} 红${h1?.killCnt||0}/${h1?.deadCnt||0}`;
+  }
+  gameRunning = false;
+}
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onopen = () => {
+    document.getElementById('ws-status').textContent = '✅ 已连接';
+    document.getElementById('ws-status').style.color = '#4caf50';
+  };
+  ws.onclose = () => {
+    document.getElementById('ws-status').textContent = '⛔ 断开';
+    document.getElementById('ws-status').style.color = '#f44336';
+    gameRunning = false;
+    setTimeout(connect, 2000);
+  };
+  ws.onmessage = (evt) => {
+    try {
+      const data = JSON.parse(evt.data);
+      if (data.type === 'status') {
+        console.log('Status:', data.msg);
+        if (data.msg === 'game started') {
+          document.getElementById('start-btn').style.display = 'none';
+          gameRunning = true;
+        }
+        return;
+      }
+      if (data.type === 'gameover') {
+        showGameOver(data.winner, data.reason);
+        return;
+      }
+      if (data.gameover) {
+        drawFrame(data);
+        updateUI(data);
+        showGameOver(data.winner, data.reason);
+        return;
+      }
+      drawFrame(data);
+      updateUI(data);
+    } catch(e) {
+      console.error('Parse error:', e);
+    }
+  };
+}
+
+function startGame() {
+  document.getElementById('gameover-overlay').classList.remove('show');
+  document.getElementById('start-btn').style.display = 'none';
+  document.getElementById('log-container').innerHTML = '';
+  const log = document.getElementById('log-container');
+  log.innerHTML = '<div style="color:#888;font-size:11px">对局开始...</div>';
+  document.getElementById('game-info').innerHTML = '<div style="color:#888">对局中...</div>';
+  frameData = null;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({action: 'start'}));
+  } else {
+    document.getElementById('start-btn').style.display = 'block';
+    document.getElementById('start-btn').textContent = '连接中...';
+  }
+}
+
+function stopGame() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({action: 'stop'}));
+  }
+  gameRunning = false;
+  document.getElementById('start-btn').style.display = 'block';
+  document.getElementById('start-btn').textContent = '重新开始';
+}
+
+function toggleShop() {
+  document.getElementById('shop-modal').classList.toggle('show');
+  if (document.getElementById('shop-modal').classList.contains('show')) {
+    fetchShop();
+  }
+}
+
+async function fetchShop() {
+  try {
+    const resp = await fetch('/api/shop');
+    const data = await resp.json();
+    const container = document.getElementById('shop-items');
+    container.innerHTML = data.items.map(item => {
+      const stats = [];
+      if (item.phy_atk) stats.push(`物攻+${item.phy_atk}`);
+      if (item.mgc_atk) stats.push(`法攻+${item.mgc_atk}`);
+      if (item.phy_def) stats.push(`物防+${item.phy_def}`);
+      if (item.mgc_def) stats.push(`魔防+${item.mgc_def}`);
+      if (item.max_hp) stats.push(`生命+${item.max_hp}`);
+      if (item.crit) stats.push(`暴击+${item.crit*100}%`);
+      if (item.atk_spd) stats.push(`攻速+${Math.round(item.atk_spd*100)}%`);
+      return `<div class="shop-item" onclick="buyItem(${item.id})">
+        <div class="item-info">
+          <span class="item-name">${item.name}</span>
+          <span class="item-stats">${stats.join(' | ') || '基础物品'}</span>
+        </div>
+        <span class="item-price">${item.price}G</span>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    console.error('Shop fetch error:', e);
+  }
+}
+
+function buyItem(itemId) {
+  console.log('Buy item:', itemId);
+}
+
+// Speed control
+document.getElementById('speed-control').addEventListener('input', function() {
+  const val = parseInt(this.value);
+  document.getElementById('speed-label').textContent = `${val}x`;
+});
+
+// FPS counter
+setInterval(() => {
+  currentFps = fpsCount;
+  fpsCount = 0;
+  document.getElementById('fps-display').textContent = `${currentFps} FPS`;
+}, 1000);
+
+// RAF loop for smooth minimap updates
+function animLoop(timestamp) {
+  fpsCount++;
+  mapAnimId = requestAnimationFrame(animLoop);
+}
+
+initCanvas();
+connect();
+animLoop();
+</script>
+</body>
+</html>

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>轨迹回放 · 王者荣耀 LLM Agent</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0d0d1a;color:#e0e0e0;min-height:100vh}
+.header{background:linear-gradient(135deg,#1a1a3e,#0d0d1a);border-bottom:1px solid #2a2a4a;padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.header h1{font-size:20px;color:#f5c842;text-shadow:0 0 8px rgba(245,200,66,.2)}
+.header .sub{font-size:13px;color:#666}
+.file-area{display:flex;align-items:center;gap:12px}
+.file-area label{cursor:pointer;background:#2a2a4a;color:#e0e0e0;padding:8px 20px;border-radius:6px;font-size:14px;transition:.2s}
+.file-area label:hover{background:#3a3a5a}
+.file-area input{display:none}
+.file-area .filename{font-size:13px;color:#888;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stats{display:flex;gap:16px;flex-wrap:wrap}
+.stat{font-size:13px;color:#888}
+.stat span{color:#f5c842;font-weight:bold}
+.container{max-width:960px;margin:0 auto;padding:16px}
+.empty-state{text-align:center;padding:80px 20px;color:#555}
+.empty-state .icon{font-size:64px;margin-bottom:16px}
+.empty-state p{font-size:15px;line-height:1.8}
+#entries{display:flex;flex-direction:column;gap:12px}
+.entry{border:1px solid #2a2a4a;border-radius:10px;overflow:hidden;background:#141428;transition:border-color .2s}
+.entry:hover{border-color:#3a3a6a}
+.entry-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#1a1a35;border-bottom:1px solid #2a2a4a;cursor:pointer;user-select:none}
+.entry-header .step{font-weight:bold;color:#f5c842;font-size:14px}
+.entry-header .time{font-size:12px;color:#666}
+.entry-header .expand{color:#888;font-size:12px;transition:transform .2s}
+.entry-header .expand.open{transform:rotate(180deg)}
+.entry-body{padding:0;max-height:0;overflow:hidden;transition:max-height .3s ease,padding .3s ease}
+.entry-body.open{padding:16px;max-height:none}
+.section{margin-bottom:16px}
+.section:last-child{margin-bottom:0}
+.section-label{font-size:12px;font-weight:bold;color:#888;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.section-label .badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px}
+.badge.sys{background:#4a148c;color:#ce93d8}
+.badge.in{background:#1a4a1a;color:#81c784}
+.badge.out{background:#4a2a0a;color:#ffb74d}
+.section-content{font-family:ui-monospace,'Cascadia Code','Fira Code','Consolas',monospace;font-size:13px;line-height:1.7;white-space:pre-wrap;word-break:break-word;background:#0d0d1a;border-radius:6px;padding:12px;border:1px solid #2a2a4a}
+.section-content .truncated{color:#888;font-style:italic;font-size:11px;margin-top:4px}
+.highlight{background:#2a2a1a;border:1px solid #5a5a2a}
+.collapsible-sys{cursor:pointer;display:flex;align-items:center;gap:6px;color:#888;font-size:12px;margin-bottom:6px}
+.collapsible-sys:hover{color:#bbb}
+.tool-bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.tool-bar button{background:#2a2a4a;border:none;color:#e0e0e0;padding:6px 16px;border-radius:6px;font-size:13px;cursor:pointer;transition:.2s}
+.tool-bar button:hover{background:#3a3a5a}
+.tool-bar button.active{background:#f5c842;color:#1a1a2e;font-weight:bold}
+.search-bar{display:flex;gap:8px;margin-bottom:16px;align-items:center}
+.search-bar input{flex:1;background:#1a1a35;border:1px solid #2a2a4a;border-radius:6px;padding:8px 12px;color:#e0e0e0;font-size:13px;outline:none;transition:border-color .2s}
+.search-bar input:focus{border-color:#f5c842}
+.search-bar input::placeholder{color:#555}
+.step-indicator{display:inline-flex;align-items:center;gap:4px}
+.step-indicator .v{display:inline-block;width:6px;height:6px;border-radius:50%}
+.step-indicator .v.green{background:#4caf50}
+.step-indicator .v.yellow{background:#ff9800}
+.step-indicator .v.red{background:#f44336}
+@media(max-width:600px){.header h1{font-size:16px}.entry-header{padding:8px 12px}.entry-body.open{padding:12px}.section-content{font-size:12px;padding:8px}}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>📜 决策轨迹回放</h1>
+    <div class="sub">LLM 决策日志浏览器 · SYS / 输入 / 输出</div>
+  </div>
+  <div class="file-area">
+    <span class="filename" id="fileName">未加载文件</span>
+    <label for="fileInput">📂 选择 JSONL</label>
+    <input type="file" id="fileInput" accept=".jsonl">
+  </div>
+</div>
+<div class="container">
+  <div class="stats" id="statsBar">
+    <div class="stat">步数: <span id="totalSteps">0</span></div>
+    <div class="stat">文件大小: <span id="fileSize">0 KB</span></div>
+  </div>
+  <div class="tool-bar" id="toolBar" style="display:none">
+    <button class="active" data-filter="all" onclick="setFilter('all')">全部</button>
+    <button data-filter="error" onclick="setFilter('error')">⚠️ 含错误</button>
+    <button data-filter="long" onclick="setFilter('long')">📏 长回复</button>
+    <button onclick="expandAll()">▼ 展开全部</button>
+    <button onclick="collapseAll()">▶ 折叠全部</button>
+  </div>
+  <div class="search-bar" id="searchBar" style="display:none">
+    <input type="text" id="searchInput" placeholder="搜索 SYS / 输入 / 输出内容..." oninput="onSearch()">
+    <span style="font-size:12px;color:#666" id="matchCount"></span>
+  </div>
+  <div id="entries"></div>
+  <div class="empty-state" id="emptyState">
+    <div class="icon">📂</div>
+    <p>拖入或选择 <code>.jsonl</code> 轨迹文件查看决策记录</p>
+  </div>
+</div>
+
+<script>
+let data = [];
+let filter = 'all';
+let expandedSet = new Set();
+
+document.getElementById('fileInput').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById('fileName').textContent = file.name;
+  const sizeKb = (file.size / 1024).toFixed(1);
+  document.getElementById('fileSize').textContent = sizeKb + ' KB';
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    const lines = evt.target.result.split('\n').filter(l => l.trim());
+    data = lines.map((line, i) => {
+      try {
+        const obj = JSON.parse(line);
+        obj._idx = i;
+        obj._hasError = obj.parsed_results && (String(obj.parsed_results).includes('error') || String(obj.parsed_results).includes('Error'));
+        obj._replyLen = (obj.llm_reply || '').length;
+        return obj;
+      } catch(e) {
+        return { _idx: i, step: i, _parseError: true, _raw: line, _hasError: true, _replyLen: 0, system_prompt: '', user_msg: '', llm_reply: '', parsed_results: 'JSON parse error: ' + e.message };
+      }
+    });
+    document.getElementById('totalSteps').textContent = data.length;
+    document.getElementById('toolBar').style.display = 'flex';
+    document.getElementById('searchBar').style.display = 'flex';
+    document.getElementById('emptyState').style.display = 'none';
+    render();
+  };
+  reader.readAsText(file, 'UTF-8');
+});
+
+function render() {
+  const container = document.getElementById('entries');
+  container.innerHTML = '';
+  const q = document.getElementById('searchInput').value.toLowerCase().trim();
+  let match = 0;
+  data.forEach((entry, i) => {
+    const sys = entry.system_prompt || '';
+    const user = entry.user_msg || '';
+    const reply = entry.llm_reply || '';
+    const result = entry.parsed_results !== undefined ? JSON.stringify(entry.parsed_results, null, 2) : '';
+    const combined = (sys + ' ' + user + ' ' + reply + ' ' + result).toLowerCase();
+    if (q && !combined.includes(q)) return;
+    const isError = entry._hasError;
+    const isLong = entry._replyLen > 500;
+    if (filter === 'error' && !isError) return;
+    if (filter === 'long' && !isLong) return;
+    match++;
+    const div = document.createElement('div');
+    div.className = 'entry' + (isError ? ' highlight' : '');
+    div.id = 'entry-' + i;
+    const timeStr = entry.time ? new Date(entry.time * 1000).toLocaleTimeString() : '';
+    let stepLabel = 'Step ' + (entry.step ?? i);
+    const isOpen = expandedSet.has(i);
+    div.innerHTML = `
+      <div class="entry-header" onclick="toggleEntry(${i})">
+        <div class="step-indicator">
+          <span class="step">${stepLabel}</span>
+          ${isLong ? '<span class="v yellow"></span>' : ''}
+          ${isError ? '<span class="v red"></span>' : '<span class="v green"></span>'}
+        </div>
+        <span class="time">${timeStr}</span>
+        <span class="expand ${isOpen ? 'open' : ''}">▼</span>
+      </div>
+      <div class="entry-body ${isOpen ? 'open' : ''}">
+        <div class="section">
+          <div class="section-label"><span class="badge sys">SYS</span> 系统提示</div>
+          <div class="section-content">${escapeHtml(sys || '(truncated to 200 chars)')}</div>
+        </div>
+        <div class="section">
+          <div class="section-label"><span class="badge in">IN</span> 输入</div>
+          <div class="section-content">${escapeHtml(user)}</div>
+        </div>
+        <div class="section">
+          <div class="section-label"><span class="badge out">OUT</span> 输出</div>
+          <div class="section-content">${escapeHtml(reply)}</div>
+        </div>
+        ${result ? `<div class="section">
+          <div class="section-label">📋 解析结果</div>
+          <div class="section-content">${escapeHtml(result)}</div>
+        </div>` : ''}
+        ${entry._parseError ? `<div class="section">
+          <div class="section-label" style="color:#f44336">⚠ 解析错误</div>
+          <div class="section-content">${escapeHtml(entry._raw)}</div>
+        </div>` : ''}
+      </div>
+    `;
+    container.appendChild(div);
+  });
+  document.getElementById('matchCount').textContent = q ? match + '/' + data.length + ' 条' : '';
+  if (match === 0 && q) {
+    container.innerHTML = '<div class="empty-state" style="display:block"><div class="icon">🔍</div><p>无匹配结果</p></div>';
+  }
+}
+
+function toggleEntry(i) {
+  if (expandedSet.has(i)) expandedSet.delete(i);
+  else expandedSet.add(i);
+  renderScroll(i);
+}
+
+function renderScroll(scrollTo) {
+  render();
+  if (scrollTo !== undefined) {
+    const el = document.getElementById('entry-' + scrollTo);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+function expandAll() {
+  data.forEach((_, i) => expandedSet.add(i));
+  render();
+}
+
+function collapseAll() {
+  expandedSet.clear();
+  render();
+}
+
+function setFilter(f) {
+  filter = f;
+  document.querySelectorAll('[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === f));
+  render();
+}
+
+function onSearch() {
+  render();
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+document.addEventListener('dragover', e => { e.preventDefault(); document.body.style.border = '3px dashed #f5c842'; });
+document.addEventListener('dragleave', () => { document.body.style.border = ''; });
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  document.body.style.border = '';
+  const file = e.dataTransfer.files[0];
+  if (file && file.name.endsWith('.jsonl')) {
+    document.getElementById('fileInput').files = e.dataTransfer.files;
+    document.getElementById('fileInput').dispatchEvent(new Event('change'));
+  }
+});
+</script>
+</body>
+</html>

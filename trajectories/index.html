@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>轨迹回放 · 王者荣耀 LLM Agent</title>
+<style>
+:root{--bg:#0d0d1a;--surface:#141428;--surface2:#1a1a35;--border:#2a2a4a;--text:#e0e0e0;--muted:#666;--accent:#f5c842;--accent-dim:rgba(245,200,66,.15);--green:#4caf50;--red:#f44336;--orange:#ff9800}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);display:flex}
+.layout{display:flex;width:100%;height:100vh;overflow:hidden}
+
+/* sidebar */
+.sidebar{width:280px;min-width:280px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sidebar .head{padding:14px 16px;border-bottom:1px solid var(--border)}
+.sidebar .head h1{font-size:16px;color:var(--accent)}
+.sidebar .head p{font-size:11px;color:var(--muted);margin-top:2px}
+.file-list{flex:1;overflow-y:auto;padding:8px}
+.file-item{padding:10px 12px;border-radius:8px;cursor:pointer;transition:.15s;margin-bottom:4px;border:1px solid transparent}
+.file-item:hover{background:var(--surface2);border-color:var(--border)}
+.file-item.active{background:var(--accent-dim);border-color:var(--accent)}
+.file-item .name{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-item .meta{font-size:11px;color:var(--muted);margin-top:3px;display:flex;gap:12px}
+.file-item .meta span{display:flex;align-items:center;gap:3px}
+.file-item .badge{display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;background:var(--accent-dim);color:var(--accent);margin-left:6px}
+.sidebar .empty-files{text-align:center;padding:40px 16px;color:var(--muted);font-size:13px;line-height:1.8}
+
+/* main */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.toolbar{display:flex;align-items:center;gap:10px;padding:10px 20px;background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap}
+.toolbar .info{font-size:13px;color:var(--muted);margin-right:auto}
+.toolbar .info strong{color:var(--text)}
+.toolbar button{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer;transition:.15s}
+.toolbar button:hover{background:var(--border)}
+.toolbar button.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+.toolbar input[type=search]{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;color:var(--text);font-size:12px;outline:none;width:200px}
+.toolbar input[type=search]:focus{border-color:var(--accent)}
+.toolbar input[type=search]::placeholder{color:#555}
+.toolbar .match{font-size:11px;color:var(--muted)}
+.content{flex:1;overflow-y:auto;padding:16px 20px}
+.content.loading{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:15px}
+
+/* entry */
+.entry{border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface);margin-bottom:10px;transition:border-color .15s}
+.entry:hover{border-color:#3a3a6a}
+.entry.highlight{border-color:#5a5a2a;background:#1a1a10}
+.entry-header{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--surface2);cursor:pointer;user-select:none;font-size:13px}
+.entry-header .step{font-weight:700;color:var(--accent);min-width:60px}
+.entry-header .frame{color:var(--muted);font-size:11px}
+.entry-header .status{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.entry-header .status.ok{background:var(--green)}
+.entry-header .status.err{background:var(--red)}
+.entry-header .status.long{background:var(--orange)}
+.entry-header .expand{margin-left:auto;color:var(--muted);font-size:10px;transition:transform .2s}
+.entry-header .expand.open{transform:rotate(180deg)}
+.entry-body{padding:0;max-height:0;overflow:hidden;transition:max-height .25s ease,padding .25s ease}
+.entry-body.open{padding:14px;max-height:none}
+.section{margin-bottom:14px}
+.section:last-child{margin-bottom:0}
+.section .label{font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;display:flex;align-items:center;gap:5px}
+.section .label .tag{display:inline-block;padding:1px 7px;border-radius:8px;font-size:10px;font-weight:700}
+.tag.sys{background:#4a148c;color:#ce93d8}
+.tag.in{background:#1a4a1a;color:#81c784}
+.tag.out{background:#4a2a0a;color:#ffb74d}
+.tag.result{background:#0a3a4a;color:#4fc3f7}
+.section .body{font-family:ui-monospace,'Cascadia Code','Fira Code','Consolas',monospace;font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;background:#0a0a14;border-radius:5px;padding:10px 12px;border:1px solid var(--border)}
+.entry .empty-body{text-align:center;padding:20px;color:#444;font-size:12px;font-style:italic}
+.in-container{background:#0d0d1a;border-radius:6px;padding:12px;border:1px solid var(--border)}
+.in-container .in-part .body{background:#0a0a14;margin-top:4px}
+.sys-panel{border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface);margin-bottom:14px}
+.sys-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);cursor:pointer;user-select:none}
+.sys-header .label{font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px}
+.sys-header .expand{color:var(--muted);font-size:10px;transition:transform .2s}
+.sys-header .expand.open{transform:rotate(180deg)}
+.sys-body{padding:0;max-height:0;overflow:hidden;transition:max-height .25s ease,padding .25s ease}
+.sys-body.open{padding:14px;max-height:none}
+.sys-body .body{font-family:ui-monospace,'Cascadia Code','Fira Code','Consolas',monospace;font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;background:#0a0a14;border-radius:5px;padding:10px 12px;border:1px solid var(--border)}
+
+/* empty state */
+.empty-state{text-align:center;padding:80px 20px;color:#444}
+.empty-state .icon{font-size:48px;margin-bottom:12px}
+.empty-state p{font-size:14px;line-height:1.8}
+.empty-state .hint{color:var(--muted);font-size:12px;margin-top:8px}
+
+@media(max-width:768px){
+  .sidebar{width:200px;min-width:200px}
+  .toolbar input[type=search]{width:120px}
+  .entry-header{font-size:12px;padding:6px 10px}
+  .entry-body.open{padding:10px}
+  .section .body{font-size:11.5px;padding:8px}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <!-- sidebar -->
+  <div class="sidebar">
+    <div class="head">
+      <h1>📜 轨迹回放</h1>
+      <p>王者荣耀 LLM Agent 决策日志</p>
+    </div>
+    <div class="file-list" id="fileList"></div>
+  </div>
+
+  <!-- main -->
+  <div class="main">
+    <div class="toolbar" id="toolbar" style="display:none">
+      <span class="info" id="fileInfo"><strong id="fileName">—</strong> · <span id="stepCount">0</span> 步 · <span id="fileSize">0 KB</span></span>
+      <button id="btnExpandAll" onclick="expandAll()">▼ 展开全部</button>
+      <button id="btnCollapseAll" onclick="collapseAll()">▶ 折叠全部</button>
+      <button id="btnFilterErr" onclick="toggleFilter('err')">⚠ 错误</button>
+      <button id="btnFilterLong" onclick="toggleFilter('long')">📏 长回复</button>
+      <input type="search" id="searchInput" placeholder="搜索..." oninput="renderEntries()">
+      <span class="match" id="matchCount"></span>
+    </div>
+    <div class="content" id="content">
+      <div class="empty-state">
+        <div class="icon">📂</div>
+        <p>从左侧选择轨迹文件查看</p>
+        <p class="hint">如需启动文件服务器：<code>python trajectories/serve.py</code></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const FILE_API = '/api/files';
+const DATA_API = '/api/data';
+
+let files = [];
+let currentFile = null;
+let entries = [];
+let sysText = '';
+let sysOpen = false;
+let expanded = new Set();
+let filterErr = false;
+let filterLong = false;
+let searchQuery = '';
+
+async function loadFileList() {
+  const el = document.getElementById('fileList');
+  try {
+    const res = await fetch(FILE_API);
+    const data = await res.json();
+    files = (data.files || []).sort((a, b) => b.mtime - a.mtime);
+  } catch(e) {
+    el.innerHTML = `<div class="empty-files">⚠ 无法连接服务器<br><span style="font-size:11px">python trajectories/serve.py</span></div>`;
+    return;
+  }
+  if (files.length === 0) {
+    el.innerHTML = `<div class="empty-files">暂无 .jsonl 文件<br><span style="font-size:11px">运行游戏后轨迹文件会自动保存在此</span></div>`;
+    return;
+  }
+  el.innerHTML = files.map((f, i) => {
+    const dateStr = fmtTime(f.mtime);
+    const sizeStr = f.size > 1024 ? (f.size/1024).toFixed(1)+'KB' : f.size+'B';
+    return `<div class="file-item${i===0?' active':''}" data-idx="${i}" onclick="selectFile(${i})">
+      <div class="name">${esc(f.name)}</div>
+      <div class="meta"><span>📄 ${sizeStr}</span><span>⏱ ${dateStr}</span>${f.steps ? `<span>#${f.steps}</span>` : ''}</div>
+    </div>`;
+  }).join('');
+  if (files.length > 0) selectFile(0);
+}
+
+async function selectFile(idx) {
+  document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
+  const item = document.querySelector(`.file-item[data-idx="${idx}"]`);
+  if (item) item.classList.add('active');
+  const f = files[idx];
+  if (!f) return;
+  currentFile = f.name;
+  const content = document.getElementById('content');
+  content.innerHTML = '<div class="loading">⏳ 加载中...</div>';
+  document.getElementById('toolbar').style.display = 'none';
+  try {
+    const res = await fetch(`${DATA_API}?file=${encodeURIComponent(f.name)}`);
+    const data = await res.json();
+    entries = data.entries || [];
+    document.getElementById('fileInfo').style.display = '';
+    document.getElementById('fileName').textContent = f.name;
+    document.getElementById('stepCount').textContent = entries.length;
+    document.getElementById('fileSize').textContent = f.size > 1024 ? (f.size/1024).toFixed(1)+'KB' : f.size+'B';
+    document.getElementById('toolbar').style.display = 'flex';
+    expanded.clear();
+    sysText = '';
+    for (const e of entries) {
+      const s = e.system_prompt || e.sys || e.system || '';
+      if (s) { sysText = s; break; }
+    }
+    sysOpen = false;
+    renderEntries();
+  } catch(e) {
+    content.innerHTML = `<div class="empty-state"><div class="icon">⚠</div><p>加载失败: ${e.message}</p></div>`;
+  }
+}
+
+function renderEntries() {
+  const content = document.getElementById('content');
+  searchQuery = document.getElementById('searchInput').value.toLowerCase().trim();
+  let match = 0;
+
+  const sysPanel = sysText ? `<div class="sys-panel">
+    <div class="sys-header" onclick="toggleSys()">
+      <span class="label"><span class="tag sys">SYS</span> 系统提示</span>
+      <span class="expand ${sysOpen?'open':''}">▼</span>
+    </div>
+    <div class="sys-body ${sysOpen?'open':''}"><div class="body">${esc(sysText)}</div></div>
+  </div>` : '';
+
+  const html = entries.map((e, i) => {
+    const user = e.user_msg || e.user || '';
+    const reply = e.llm_reply || e.reply || '';
+    const result = e.parsed_results !== undefined ? (typeof e.parsed_results === 'string' ? e.parsed_results : JSON.stringify(e.parsed_results, null, 2)) : '';
+
+    const combined = (sysText + ' ' + user + ' ' + reply + ' ' + result).toLowerCase();
+    if (searchQuery && !combined.includes(searchQuery)) return '';
+
+    const isErr = result.toLowerCase().includes('error') || reply.toLowerCase().includes('error') || e._parseError;
+    const isLong = reply.length > 500;
+    if (filterErr && !isErr) return '';
+    if (filterLong && !isLong) return '';
+
+    match++;
+    const open = expanded.has(i);
+    const stepLabel = (() => {
+      if (e.step === undefined && e.time === undefined) return '#'+i;
+      const st = e.step !== undefined ? e.step : e.time;
+      if (typeof st === 'number' && st > 1e8 && st < 2e10) return fmtTime(st);
+      const sn = parseFloat(st);
+      if (!isNaN(sn) && sn > 1e8 && sn < 2e10) return fmtTime(sn);
+      return typeof st === 'number' ? 'Step '+st : '#'+i;
+    })();
+    const ts = fmtTime(e.time);
+
+    let statusClass = 'ok';
+    if (isErr || e._parseError) statusClass = 'err';
+    else if (isLong) statusClass = 'long';
+
+    const hasUser = !!user;
+    const hasReply = !!reply;
+
+    return `<div class="entry${isErr?' highlight':''}" id="entry-${i}">
+      <div class="entry-header" onclick="toggle(${i})">
+        <span class="step">${esc(stepLabel)}</span>
+        ${ts ? `<span class="frame">${ts}</span>` : ''}
+        <span class="status ${statusClass}"></span>
+        <span class="expand ${open?'open':''}">▼</span>
+      </div>
+      <div class="entry-body ${open?'open':''}">
+        ${hasUser ? `<div class="section"><div class="label"><span class="tag in">USER</span> 输入</div><div class="body">${esc(user)}</div></div>` : ''}
+        ${hasReply ? `<div class="section"><div class="label"><span class="tag out">OUT</span> 输出</div><div class="body">${esc(reply)}</div></div>` : ''}
+        ${result ? `<div class="section"><div class="label"><span class="tag result">RES</span> 解析结果</div><div class="body">${esc(result)}</div></div>` : ''}
+        ${!hasUser && !hasReply && !result ? '<div class="empty-body">（空记录）</div>' : ''}
+        ${e._parseError ? `<div class="section"><div class="label" style="color:var(--red)">⚠ 解析错误</div><div class="body" style="color:var(--red)">${esc(e._raw||'')}</div></div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  if (!html.trim() && !sysPanel) {
+    content.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>无条目</p></div>`;
+  } else if (!html.trim() && searchQuery) {
+    content.innerHTML = sysPanel + `<div class="empty-state"><div class="icon">🔍</div><p>无匹配结果</p></div>`;
+  } else {
+    content.innerHTML = sysPanel + html;
+  }
+  document.getElementById('matchCount').textContent = searchQuery ? `${match}/${entries.length}` : '';
+}
+
+function toggleSys() {
+  sysOpen = !sysOpen;
+  renderEntries();
+}
+
+function toggle(i) {
+  expanded.has(i) ? expanded.delete(i) : expanded.add(i);
+  renderEntries();
+  requestAnimationFrame(() => {
+    document.getElementById('entry-'+i)?.scrollIntoView({behavior:'smooth', block:'center'});
+  });
+}
+
+function expandAll() {
+  entries.forEach((_, i) => expanded.add(i));
+  sysOpen = true;
+  renderEntries();
+}
+
+function collapseAll() {
+  expanded.clear();
+  sysOpen = false;
+  renderEntries();
+}
+
+function toggleFilter(type) {
+  if (type === 'err') { filterErr = !filterErr; document.getElementById('btnFilterErr').classList.toggle('active'); }
+  if (type === 'long') { filterLong = !filterLong; document.getElementById('btnFilterLong').classList.toggle('active'); }
+  renderEntries();
+}
+
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtTime(ts) {
+  if (!ts && ts !== 0) return '';
+  const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);
+  if (isNaN(d.getTime())) return String(ts);
+  return `${d.getFullYear()}.${d.getMonth()+1}.${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+}
+
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => e.preventDefault());
+
+loadFileList();
+</script>
+</body>
+</html>
