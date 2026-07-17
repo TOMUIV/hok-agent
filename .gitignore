@@ -37,12 +37,8 @@ papers/
 src_v2/
 
 # Debug scripts (internal use only)
-src/dat_debug.py
-src/decode_config.py
-src/fix_ailab.py
-src/setup_ailab.py
-src/test_agent.py
-src/test_final_OK.py
-src/test_full_flow.py
-src/test_minimal.py
-src/test_reset.py
+tests/test_agent.py
+tests/test_final_OK.py
+tests/test_full_flow.py
+tests/test_minimal.py
+tests/test_reset.py

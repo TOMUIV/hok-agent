@@ -7,6 +7,7 @@ from pathfinding import astar
 CENTER = 8
 BTN_MOVE, BTN_ATTACK = 2, 3
 BTN_SKILLS = {1:4, 2:5, 3:6, 4:10}
+BTN_RECALL = 9
 
 BUTTONS = ["None1","None2","Move","Attack","Skill1","Skill2","Skill3","HealSkill","ChosenSkill","Recall","Skill4","EquipSkill"]
 MACRO_ACTIONS = ["FARM", "POKE", "ALL_IN", "KITE", "RETREAT", "DEFEND", "STAND_AND_SHOOT", "SYSTEM_HELP", "PURSUE", "MOVE_TO", "ATTACK_TARGET", "RECALL", "USE_SKILL"]
@@ -37,6 +38,7 @@ class SkillContext:
         self.px = self.py = 0
         self.ex = self.ey = 0
         self.hero_config = None
+        self.pb = None
 
     def refresh(self, info):
         self.la = info.get("legal_action", [])
@@ -113,6 +115,18 @@ class ProtocolExecutor:
         if not self.ctx.refresh(info):
             return (2, 8, 8, 8, 8, 0), ""
 
+        if self._concrete_skill is not None:
+            try:
+                from skills_concrete import SKILL_REGISTRY as CONCRETE_REGISTRY
+                if hasattr(self._concrete_skill, 'ctx'):
+                    self._concrete_skill.ctx.refresh(info)
+                action, done = self._concrete_skill.update()
+                if done:
+                    self._concrete_skill = None
+                return action, ""
+            except Exception:
+                self._concrete_skill = None
+
         if self.last_actions:
             action = self.last_actions.pop(0)
             return action, ""
@@ -174,6 +188,8 @@ class ProtocolExecutor:
         if not self.ctx.refresh(info):
             return [{"type": "error", "msg": "state refresh failed"}]
 
+        from skills_concrete import SKILL_REGISTRY as CONCRETE_REGISTRY, SkillContext as ConcreteCtx
+
         results = []
         lines = llm_output.strip().split("\n")
         for line in lines:
@@ -207,8 +223,7 @@ class ProtocolExecutor:
             m = re.match(r"@SKILL_CALL\s+(\w+)\.(\w+)\(([^)]*)\)", line)
             if m:
                 sk_name = m.group(1)
-                from skills_concrete import SKILL_REGISTRY as CONCRETE_REGISTRY, SkillContext as ConcreteCtx
-                sk_cls = CONCRETE_REGISTRY.get(sk_name)
+                sk_cls = CONCRETE_REGISTRY.get(sk_name.upper())
                 if sk_cls:
                     sk = sk_cls()
                     sk.ctx = ConcreteCtx(self.self_hero_id)
@@ -216,10 +231,8 @@ class ProtocolExecutor:
                     sk.params = {}
                     if hasattr(sk, '_start'):
                         sk._start()
-                    # 每次LLM调用时替换当前skill，之后step()会持续执行它
                     self._concrete_skill = sk
                     self.last_actions.clear()
-                    # 首帧动作立即放入队列
                     action, done = sk.update()
                     self.last_actions.append(action)
                     results.append({"type": "skill_call", "skill": sk_name, "func": m.group(2)})

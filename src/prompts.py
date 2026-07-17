@@ -6,6 +6,7 @@
 #   AUDIT = PROMPT_BASE + PROMPT_AUDIT
 
 PROMPT_BASE = """You control {self_name}({self_type}) vs {enemy_name}({enemy_type}) in Honor of Kings 1v1.
+STRICT adherence to FORMAT RULES and EXPERIENCE is REQUIRED. Violations lose the game.
 
 === GAME RULES ===
 --- GAME MODE ---
@@ -85,8 +86,17 @@ Notable IDs: BLUE_BUFF=6010, RED_BUFF=6011, ZHUZHAI=6009, BAOJUN=6012, DARK_BAOJ
 === MACRO SKILLS ===
 {skilldoc}
 
-=== EXPERIENCE ===
+=== EXPERIENCE — OBEY THIS ===
 {experience}
+WARNING: This experience is verified across multiple games. Trust it. Ignoring it loses the match.
+
+=== FORMAT RULES — YOU MUST OBEY ===
+- LANGUAGE: English ONLY. Chinese output = forbidden.
+- MARKDOWN: Forbidden. No ** * ` [] # >.
+- HEADERS: Exactly === SECTION NAME === (uppercase, spaces around name).
+- SUB-HEADERS: Exactly --- Sub Header ---.
+- ACTIONS: Exactly @SKILL_CALL Skill.func().
+- DEVIATION = GAME OVER. These are not suggestions.
 """
 
 
@@ -98,26 +108,31 @@ EXPERIENCE_WARNING = (
 
 PROMPT_SYS1_PROTOCOL = """
 === PROTOCOL ===
-You have the full game state above. Analyze and decide.
+Remember: FORMAT RULES at the top are mandatory. EXPERIENCE is verified across games.
+
+Analyze the game state and decide.
 
 RULES:
 - ENEMY may be OUT OF VISION (camp_visible=false). Show as FOW and position is fake.
 - When FOW do NOT trust enemy position for distance calculation.
 - All movement and actions MUST go through @SKILL_CALL. Never use raw buttons.
-- You can call MULTIPLE sub-functions in a single <action> block.
+- You can call MULTIPLE sub-functions in a single === ACTION === block.
 - Each skill sub-function handles movement, positioning, and cooldowns automatically.
 - All distance values use the same game units. Compare them directly.
 - MACRO ACTIONS shows which sub-functions are available or blocked and why.
 
-First output <think> </think>:
-  - Review: what happened in the last few frames (HP changes, skills used, enemy movement)
-  - WhatIf check: was the previous frame's WhatIf prediction correct? why or why not?
-  - Situation: current hero stats, tower status, minion wave, positioning, FOW state
-  - WhatIf: evaluate 2 candidate actions, predict outcomes for each
-  - Decision: which skill(s) to call and why
+Output format:
+=== THINK ===
+  Review: what happened in the last few frames (HP changes, skills used, enemy movement)
+  WhatIf check: was the previous frame's WhatIf prediction correct? why or why not?
+  Situation: current hero stats, tower status, minion wave, positioning, FOW state
+  WhatIf 1: evaluate candidate action 1, predict outcome
+  WhatIf 2: evaluate candidate action 2, predict outcome
+  Decision: which skill(s) to call and why
 
-Then output <action> </action>:
-  One or more @SKILL_CALL lines, executed in order.
+=== ACTION ===
+  @SKILL_CALL Skill.func()
+  @SKILL_CALL Skill.func()  (multiple allowed)
 
 Every frame matters. Do not skip frames or assume they are identical to the previous one.
 Read each frame's Review, DELTA, and state carefully.
@@ -125,50 +140,46 @@ Read each frame's Review, DELTA, and state carefully.
 === FEW-SHOT EXAMPLES ===
 
 Example 1 -- Safe farming enemy FOW:
-  <think>
-  Review: No movement last frame minions clashing at center.
-  WhatIf check: Previous WhatIf predicted poke waste CD correct enemy still FOW.
-  Situation: SELF full HP at blue outer tower minions at center enemy FOW.
+=== THINK ===
+  Review: No movement last frame. Minions clashing at center.
+  WhatIf check: No prior frame.
+  Situation: SELF full HP at blue outer tower. Minions at center. Enemy FOW.
   WhatIf 1: FARM.last_hit() -> +40G safe farm maintain position.
-  WhatIf 2: POKE.aim_skill() -> no vision wasted CD.
-  Decision: FARM.last_hit to farm safely.
-  </think>
-  <action>
+  WhatIf 2: POKE.aim_skill() -> no vision, wasted CD.
+  Decision: FARM.last_hit() to farm safely.
+=== ACTION ===
   @SKILL_CALL FARM.last_hit()
-  </action>
 
 Example 2 -- HP advantage chaining two skills:
-  <think>
-  Review: Last frame poked enemy lost 15% HP stayed in lane.
+=== THINK ===
+  Review: Last frame poked enemy, lost 15% HP, stayed in lane.
   WhatIf check: Previous WhatIf predicted poke land correct.
-  Situation: SELF 90% vs enemy 60% both visible poke off CD.
+  Situation: SELF 90% vs enemy 60%, both visible, poke off CD.
   WhatIf 1: POKE.aim_skill() -> -200HP chip then ALL_IN.basic_attack() to pressure.
   WhatIf 2: FARM.last_hit() -> +40G safe but wastes kill window.
   Decision: Chain POKE then ALL_IN to capitalize on HP advantage.
-  </think>
-  <action>
+=== ACTION ===
   @SKILL_CALL POKE.aim_skill()
   @SKILL_CALL ALL_IN.basic_attack()
-  </action>
 
 Example 3 -- Repositioning under tower:
-  <think>
-  Review: Enemy pushed wave into my tower lost 200HP to minions.
+=== THINK ===
+  Review: Enemy pushed wave into my tower. Lost 200HP to minions.
   WhatIf check: Previous WhatIf predicted enemy push correct.
-  Situation: SELF low HP 30% enemy pushing wave to my tower.
-  WhatIf 1: FARM.retreat_to_tower() -> safe recall reset wave.
-  WhatIf 2: ALL_IN.combo_start() -> suicide enemy full HP.
+  Situation: SELF low HP 30%. Enemy pushing wave to my tower.
+  WhatIf 1: FARM.retreat_to_tower() -> safe recall, reset wave.
+  WhatIf 2: ALL_IN.combo_start() -> suicide, enemy full HP.
   Decision: Retreat to tower then recall.
-  </think>
-  <action>
+=== ACTION ===
   @SKILL_CALL FARM.retreat_to_tower()
-  </action>
 
-All macro skill docs are above. Call them directly. DO NOT use @TOOL or raw buttons."""
+All macro skill docs are above. Call them directly. DO NOT use raw buttons."""
 
 
 PROMPT_SYS2_EVENT = """
 === EVENT ANALYZE PROTOCOL ===
+Remember: FORMAT RULES at the top are mandatory. EXPERIENCE is verified across games.
+
 You analyze a specific event from a completed Honor of Kings 1v1 match.
 You receive an EVENT with BEFORE (F-100~F) and AFTER (F~F+100) context.
 Each frame shows: Review, WhatIf check, Situation, WhatIf 1-2, Decision, Action, DELTA, SELF/ENEMY state.
@@ -224,6 +235,8 @@ Output:
 
 PROMPT_SYS3_GLOBAL = """
 === GAME REVIEW PROTOCOL ===
+Remember: FORMAT RULES at the top are mandatory. EXPERIENCE is verified across games.
+
 You review a complete Honor of Kings 1v1 match.
 You receive the match summary + full frame DETAIL for the entire game.
 
@@ -246,6 +259,8 @@ Context must focus on a specific moment. Lesson must include SKILL.FUNC().
 
 PROMPT_AUDIT = """
 === EXPERIENCE AUDIT PROTOCOL ===
+Remember: FORMAT RULES at the top are mandatory. EXPERIENCE is verified across games.
+
 You audit existing game experience against a completed match.
 You receive:
   1. MATCH + TRENDS + DETAIL (full game)
@@ -280,3 +295,54 @@ Input BUFFER item:
 Score: -1
 Score reason: Contradicts DB which says ALL_IN directly (validated 3/4). POKE first adds unnecessary delay.
 """
+
+
+def build_full_prompt(self_hero_id, enemy_hero_id, extra_proto, experience=None):
+    """Build the full PROMPT_BASE with hero_info, skilldoc, and experience filled in."""
+    import gamecore_data as gc
+    from skill_base import SKILL_REGISTRY
+    from skill_db import get_matchup
+
+    self_name = gc.get_hero_en_name(self_hero_id)
+    enemy_name = gc.get_hero_en_name(enemy_hero_id)
+    self_type = gc.get_hero_role(self_hero_id)
+    enemy_type = gc.get_hero_role(enemy_hero_id)
+
+    def _fmt_skills(hid, name, role):
+        lines = [f"  {name} ({role})"]
+        skills = gc.get_hero_skill_info(hid)
+        if not skills:
+            lines.append("    (no detailed skill data from gamecore)")
+        for slot in [1, 2, 3]:
+            s = skills.get(slot)
+            if s:
+                lines.append(f"    S{slot}: range={s['range']} shape={s['shape']} aim={s['release']} ep={s['ep_cost']}")
+        return "\n".join(lines)
+
+    hero_info_lines = [_fmt_skills(self_hero_id, self_name, self_type), "", _fmt_skills(enemy_hero_id, enemy_name, enemy_type)]
+    mu = get_matchup(self_hero_id, enemy_hero_id)
+    if mu:
+        hero_info_lines.append("")
+        hero_info_lines.append("  Matchup:")
+        for k in ["summary", "advantage", "danger", "tip_offense", "tip_defense", "power_spike", "key_skill"]:
+            if k in mu:
+                hero_info_lines.append(f"    {k}: {mu[k]}")
+    hero_info = "\n".join(hero_info_lines)
+
+    skilldoc_lines = []
+    for sk_name in sorted(SKILL_REGISTRY.keys()):
+        sk = SKILL_REGISTRY[sk_name]
+        skilldoc_lines.append(sk.get_doc())
+    skilldoc = "\n\n".join(skilldoc_lines)
+
+    if experience is None:
+        exp = "(no prior experience)\n\n" + EXPERIENCE_WARNING
+    else:
+        exp = experience + "\n\n" + EXPERIENCE_WARNING
+
+    return PROMPT_BASE.format(
+        self_name=self_name, enemy_name=enemy_name,
+        self_type=self_type, enemy_type=enemy_type,
+        self_hero_id=self_hero_id, enemy_hero_id=enemy_hero_id,
+        skilldoc=skilldoc, hero_info=hero_info, experience=exp,
+    ) + extra_proto

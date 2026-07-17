@@ -1,4 +1,4 @@
-import json, os, re, time, math
+﻿import json, os, re, time, math
 from openai import OpenAI
 
 MEMORY_JSON = os.path.join(os.path.dirname(os.path.dirname(__file__)),
@@ -134,7 +134,9 @@ def _read_trajectory(path):
             line = line.strip()
             if line:
                 try:
-                    entries.append(json.loads(line))
+                    obj = json.loads(line)
+                    if "frame" in obj:
+                        entries.append(obj)
                 except json.JSONDecodeError:
                     pass
     return entries
@@ -145,19 +147,15 @@ def _extract_key_events(traj_entries):
     last_hp_self = last_hp_enemy = None
     last_gold_self = 0
     tower_had_zero = set()
-    fired_minion_wave = False
-    for idx, entry in enumerate(traj_entries):
-        user_msg = entry.get("user_msg", "")
-        m = re.search(r"=== FRAME (\d+)", user_msg) or re.search(r"Frame (\d+)", user_msg)
-        frame = int(m.group(1)) if m else idx
+    for entry in traj_entries:
+        d = entry.get("delta", {})
+        frame = entry.get("frame", 0)
+        dh = d.get("self_hp", {}); deh = d.get("enemy_hp", {})
+        dg = d.get("self_gold", {}); deg = d.get("enemy_gold", {})
 
-        m_self_hp = re.search(r"\[SELF\].*?HP:([\d.]+)/([\d.]+)", user_msg)
-        m_enemy_hp = re.search(r"\[ENEMY\].*?HP:([\d.]+)/([\d.]+)", user_msg)
-        m_self_gold = re.search(r"\[SELF\].*?Gold:([\d.]+)", user_msg)
-
-        hs = float(m_self_hp.group(1)) if m_self_hp else None
-        he = float(m_enemy_hp.group(1)) if m_enemy_hp else None
-        gs = int(float(m_self_gold.group(1))) if m_self_gold else last_gold_self
+        hs = dh.get("new") if dh else None
+        he = deh.get("new") if deh else None
+        gs = dg.get("new") if dg else last_gold_self
 
         if he is not None and last_hp_enemy is not None and he == 0 and last_hp_enemy > 0:
             events.append({"frame": frame, "type": "kill"})
@@ -167,26 +165,6 @@ def _extract_key_events(traj_entries):
             events.append({"frame": frame, "type": "gold_spike", "delta": gs - last_gold_self})
         if last_gold_self > 0 and gs - last_gold_self >= 1000:
             events.append({"frame": frame, "type": "power_spike", "delta": gs - last_gold_self})
-
-        # Tower fall detection (debounced: fires once per tower)
-        for ttype in ["outer", "inner", "crystal"]:
-            pat = f"{ttype}=HP:0/"
-            if pat in user_msg and ttype not in tower_had_zero:
-                side = "?"
-                if "--- TOWERS ---" in user_msg:
-                    tow_sec = user_msg.split("--- TOWERS ---")[1].split("---")[0]
-                    if "RED:" in tow_sec and pat in tow_sec.split("RED:")[1].split("|")[0] if "RED:" in tow_sec else "":
-                        side = "RED"
-                events.append({"frame": frame, "type": "tower_fall", "detail": f"{side} {ttype} destroyed"})
-                tower_had_zero.add(ttype)
-
-        # Minion wave detection (count visible > 6, fires once per game)
-        minion_m = re.search(r"(\d+) visible", user_msg)
-        if minion_m and not fired_minion_wave:
-            cnt = int(minion_m.group(1))
-            if cnt > 6:
-                events.append({"frame": frame, "type": "minion_wave", "detail": f"{cnt} minions pushing"})
-                fired_minion_wave = True
 
         if hs is not None:
             last_hp_self = hs
@@ -214,18 +192,8 @@ def _call_llm(sys_msg, user_msg, llm_client, model, max_tokens=800):
 
 
 def _format_sys_prompt(hero_ai, hero_bot, extra_proto, experience):
-    from hero_db import hero_name
-    from prompts import PROMPT_BASE, EXPERIENCE_WARNING
-    ai_name = hero_name(hero_ai)
-    bot_name = hero_name(hero_bot)
-    exp_text = experience if experience else "(no prior experience)"
-    exp_text += "\n\n" + EXPERIENCE_WARNING
-    return PROMPT_BASE.format(
-        self_name=ai_name, enemy_name=bot_name,
-        self_type="?", enemy_type="?",
-        self_hero_id=hero_ai, enemy_hero_id=hero_bot,
-        skilldoc="", hero_info="", experience=exp_text,
-    ) + extra_proto
+    from prompts import build_full_prompt
+    return build_full_prompt(hero_ai, hero_bot, extra_proto, experience=experience)
 
 
 class MemorySystem:
@@ -378,7 +346,7 @@ class MemorySystem:
         return "\n\n" + "\n\n".join(sections)
 
     def reflect(self, hero_ai, hero_bot, outcome, duration_frames,
-                trajectory_path, llm_client=None):
+                trajectory_path, llm_client=None, reflect_path=None):
         from hero_db import hero_name
         from prompts import PROMPT_SYS2_EVENT, PROMPT_SYS3_GLOBAL, PROMPT_AUDIT
 
@@ -389,6 +357,19 @@ class MemorySystem:
         game_id = f"game_{int(time.time())}"
         experience = self.retrieve(hero_ai, hero_bot) or ""
         buffer = []  # list of dicts: {type, kind, content, game_id, source}
+
+        def _log_reflect(phase, system_prompt, user_msg, llm_reply, **extra):
+            if not reflect_path:
+                return
+            try:
+                entry = {"phase": phase, "step": str(time.time()),
+                         "system_prompt": system_prompt, "user_msg": user_msg,
+                         "llm_reply": llm_reply, "parsed_results": ""}
+                entry.update(extra)
+                with open(reflect_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
 
         # ── SYS2: Event Analysis ──
         sys2_sys = _format_sys_prompt(hero_ai, hero_bot, PROMPT_SYS2_EVENT, experience)
@@ -401,6 +382,7 @@ class MemorySystem:
             user += f"--- BEFORE (F{ev_frame-100}~F{ev_frame}) ---\n" + bef + "\n\n"
             user += f"--- AFTER (F{ev_frame}~F{ev_frame+100}) ---\n" + aft
             reply = self._retry(sys2_sys, user, llm_client, model)
+            _log_reflect("SYS2", sys2_sys, user, reply, event_type=ev_type, event_frame=ev_frame)
             items = _parse_episodic_semantic(reply, game_id, ev_type, ev_frame)
             buffer.extend(items)
 
@@ -410,6 +392,7 @@ class MemorySystem:
         user3 = f"Match: {ai_name} vs {bot_name}, {outcome}, {duration_frames} frames\n\n"
         user3 += "=== DETAIL (full game) ===\n" + full_detail
         reply3 = self._retry(sys3_sys, user3, llm_client, model)
+        _log_reflect("SYS3", sys3_sys, user3, reply3)
         buffer.extend(_parse_episodic_semantic(reply3, game_id, "GLOBAL", 0))
 
         # ── AUDIT (always run, re-score both DB and BUFFER) ──
@@ -426,6 +409,7 @@ class MemorySystem:
         else:
             audit_user += "(none)\n"
         reply4 = self._retry(audit_sys, audit_user, llm_client, model)
+        _log_reflect("AUDIT", audit_sys, audit_user, reply4)
         if reply4:
             kept = _parse_audit_scores(reply4, buffer, self.episodic, self.semantic)
 
@@ -454,16 +438,27 @@ class MemorySystem:
     def _slice_trajectory(self, traj, f_start, f_end):
         lines = []
         for entry in traj:
-            msg = entry.get("user_msg", "")
-            m = re.search(r"Frame (\d+)", msg)
-            f = int(m.group(1)) if m else 0
-            if f_start <= f <= f_end:
-                pr = entry.get("parsed_results", "")
-                snippet = msg[:500] + ("\n  Action result: " + pr[:100] if pr else "")
-                lines.append(f"[Frame {f}] {snippet[:300]}")
-                if len(lines) > 300:
-                    lines.append("... (truncated)")
-                    break
+            f = entry.get("frame", 0)
+            if not f_start <= f <= f_end:
+                continue
+            d = entry.get("delta", {})
+            dh = d.get("self_hp", {}); deh = d.get("enemy_hp", {})
+            dg = d.get("self_gold", {}); deg = d.get("enemy_gold", {})
+            dp = d.get("self_pos", {}); dep = d.get("enemy_pos", {})
+            ev = entry.get("events", [])
+            ph = entry.get("phase", "?")
+            llm = entry.get("llm_reply", "")
+            snippet = f"[Frame {f}] {ph}"
+            if dh: snippet += f" HP:{dh.get('old',0):.0f}->{dh.get('new',0):.0f}"
+            if dg: snippet += f" G:{dg.get('old',0):.0f}->{dg.get('new',0):.0f}"
+            if dp: snippet += f" POS:{dp.get('old',[0,0])[0]:.0f},{dp.get('old',[0,0])[1]:.0f}"
+            if deh: snippet += f" | ENEMY HP:{deh.get('old',0):.0f}->{deh.get('new',0):.0f}"
+            if ev: snippet += f" EV:{[e['type'] for e in ev]}"
+            if llm: snippet += f" LLM:{llm[:100]}"
+            lines.append(snippet)
+            if len(lines) > 300:
+                lines.append("... (truncated)")
+                break
         return "\n".join(lines)
 
     def _merge_semantic(self, hero_ai, hero_bot, rule_text, ai_id, bot_id, outcome, game_id):

@@ -111,6 +111,12 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
       <button id="btnCollapseAll" onclick="collapseAll()">▶ 折叠全部</button>
       <button id="btnFilterErr" onclick="toggleFilter('err')">⚠ 错误</button>
       <button id="btnFilterLong" onclick="toggleFilter('long')">📏 长回复</button>
+      <span style="color:var(--muted);font-size:11px">|</span>
+      <button class="active" id="phaseAll" onclick="setPhase('all')">全部</button>
+      <button id="phaseSYS1" onclick="setPhase('SYS1')">SYS1</button>
+      <button id="phaseSYS2" onclick="setPhase('SYS2')">SYS2</button>
+      <button id="phaseSYS3" onclick="setPhase('SYS3')">SYS3</button>
+      <button id="phaseAUDIT" onclick="setPhase('AUDIT')">AUDIT</button>
       <input type="search" id="searchInput" placeholder="搜索..." oninput="renderEntries()">
       <span class="match" id="matchCount"></span>
     </div>
@@ -123,20 +129,94 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
     </div>
   </div>
 </div>
+<div style="position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:9999;overflow:hidden;user-select:none"><div id="wminner" style="position:absolute;top:-100vh;left:-100vw;width:300vw;height:300vh;transform:rotate(-25deg);opacity:0.1;font-size:20px;font-weight:bold;color:#aaa;font-family:'Times New Roman',KaiTi,STKaiti,serif;line-height:7;text-align:center;letter-spacing:6px"></div></div>
+<script>document.getElementById('wminner').textContent = Array(600).fill('别笑你也过不了第二关队 · 杨坤鑫 · 张腾达             ').join('');</script>
 
 <script>
-const FILE_API = '/api/files';
-const DATA_API = '/api/data';
+const FILE_API = 'api/files';
+const DATA_API = 'api/data';
 
 let files = [];
 let currentFile = null;
 let entries = [];
-let sysText = '';
 let sysOpen = false;
 let expanded = new Set();
+let showRaw = false;
 let filterErr = false;
 let filterLong = false;
 let searchQuery = '';
+let phaseFilter = 'all';
+
+const PHASE_COLORS = {SYS1:'#4fc3f7', SYS2:'#ab47bc', SYS3:'#ffa726', AUDIT:'#ef5350'};
+const PHASE_LABELS = {SYS1:'SYS1 决策', SYS2:'SYS2 事件', SYS3:'SYS3 全局', AUDIT:'AUDIT 审计'};
+
+function parseFrame(user) {
+  const m = user.match(/=== FRAME (\d+)/);
+  return m ? parseInt(m[1]) : null;
+}
+function parseSelfHP(user) {
+  const m = user.match(/\[SELF\][\s\S]*?HP:([\d.]+)\/([\d.]+)/);
+  return m ? {hp: parseFloat(m[1]), maxHp: parseFloat(m[2])} : null;
+}
+function parseEnemyHP(user) {
+  const m = user.match(/\[ENEMY\][\s\S]*?HP:([\d.]+)\/([\d.]+)/);
+  return m ? {hp: parseFloat(m[1]), maxHp: parseFloat(m[2])} : null;
+}
+function parseGold(user) {
+  const m = user.match(/\[SELF\][\s\S]*?Gold:([\d]+)/);
+  return m ? parseInt(m[1]) : null;
+}
+function parseTowers(user) {
+  const m = user.match(/--- TOWERS ---\n([\s\S]*?)\n---/);
+  if (!m) return null;
+  const t = {};
+  for (const line of m[1].split('\n')) {
+    const p = line.match(/(\w+): HP:([\d.]+)\/([\d.]+)/);
+    if (p) t[p[1].toLowerCase()] = {hp: parseFloat(p[2]), maxHp: parseFloat(p[3])};
+  }
+  return t;
+}
+function parseMacroActions(user) {
+  const m = user.match(/--- MACRO ACTIONS ---\n([\s\S]*?)(?:\n---|\n\n|$)/);
+  if (!m) return null;
+  const av = [], bl = [];
+  for (const line of m[1].split('\n')) {
+    if (line.includes('AVAILABLE:')) continue;
+    if (line.includes('BLOCKED:')) continue;
+    if (line.trim().startsWith('  ')) {
+      const t = line.trim();
+      if (t.startsWith('(')) bl.push(t);
+      else if (t) av.push(t);
+    }
+  }
+  return {available: av, blocked: bl};
+}
+function parseThink(reply) {
+  const m = reply.match(/<think>([\s\S]*?)<\/think>/);
+  if (!m) return null;
+  const text = m[1];
+  const segs = {};
+  for (const line of text.split('\n')) {
+    const l = line.trim();
+    const p = l.match(/^-?\s*(Review|WhatIf check|Situation|WhatIf \d|Decision):\s*(.*)/);
+    if (p) segs[p[1].toLowerCase()] = p[2].trim();
+  }
+  const actionM = reply.match(/<action>([\s\S]*?)<\/action>/);
+  return {think: segs, action: actionM ? actionM[1].trim() : ''};
+}
+
+function entrySummary(e, i) {
+  const user = e.user_msg || e.user || '';
+  const reply = e.llm_reply || e.reply || '';
+  const frame = parseFrame(user);
+  const selfHp = parseSelfHP(user);
+  const enemyHp = parseEnemyHP(user);
+  const gold = parseGold(user);
+  const think = parseThink(reply);
+  const actionName = think?.action?.split('\n')[0]?.trim() || '';
+  const decision = think?.think?.decision || '';
+  return {frame, selfHp, enemyHp, gold, actionName, decision};
+}
 
 async function loadFileList() {
   const el = document.getElementById('fileList');
@@ -177,18 +257,11 @@ async function selectFile(idx) {
     const res = await fetch(`${DATA_API}?file=${encodeURIComponent(f.name)}`);
     const data = await res.json();
     entries = data.entries || [];
-    document.getElementById('fileInfo').style.display = '';
     document.getElementById('fileName').textContent = f.name;
     document.getElementById('stepCount').textContent = entries.length;
     document.getElementById('fileSize').textContent = f.size > 1024 ? (f.size/1024).toFixed(1)+'KB' : f.size+'B';
     document.getElementById('toolbar').style.display = 'flex';
     expanded.clear();
-    sysText = '';
-    for (const e of entries) {
-      const s = e.system_prompt || e.sys || e.system || '';
-      if (s) { sysText = s; break; }
-    }
-    sysOpen = false;
     renderEntries();
   } catch(e) {
     content.innerHTML = `<div class="empty-state"><div class="icon">⚠</div><p>加载失败: ${e.message}</p></div>`;
@@ -200,21 +273,24 @@ function renderEntries() {
   searchQuery = document.getElementById('searchInput').value.toLowerCase().trim();
   let match = 0;
 
-  const sysPanel = sysText ? `<div class="sys-panel">
-    <div class="sys-header" onclick="toggleSys()">
-      <span class="label"><span class="tag sys">SYS</span> 系统提示</span>
-      <span class="expand ${sysOpen?'open':''}">▼</span>
-    </div>
-    <div class="sys-body ${sysOpen?'open':''}"><div class="body">${esc(sysText)}</div></div>
-  </div>` : '';
+  // compute game progression
+  let minFrame = Infinity, maxFrame = -Infinity;
+  for (const e of entries) {
+    const f = parseFrame(e.user_msg || e.user || '');
+    if (f !== null) { minFrame = Math.min(minFrame, f); maxFrame = Math.max(maxFrame, f); }
+  }
+  const frameRange = maxFrame - minFrame || 1;
 
   const html = entries.map((e, i) => {
     const user = e.user_msg || e.user || '';
     const reply = e.llm_reply || e.reply || '';
     const result = e.parsed_results !== undefined ? (typeof e.parsed_results === 'string' ? e.parsed_results : JSON.stringify(e.parsed_results, null, 2)) : '';
 
-    const combined = (sysText + ' ' + user + ' ' + reply + ' ' + result).toLowerCase();
-    if (searchQuery && !combined.includes(searchQuery)) return '';
+    const searchText = (user + ' ' + reply + ' ' + result + ' ' + (e.system_prompt||'')).toLowerCase();
+    if (searchQuery && !searchText.includes(searchQuery)) return '';
+
+    const phase = e.phase || 'SYS1';
+    if (phaseFilter !== 'all' && phase !== phaseFilter) return '';
 
     const isErr = result.toLowerCase().includes('error') || reply.toLowerCase().includes('error') || e._parseError;
     const isLong = reply.length > 500;
@@ -231,7 +307,19 @@ function renderEntries() {
       if (!isNaN(sn) && sn > 1e8 && sn < 2e10) return fmtTime(sn);
       return typeof st === 'number' ? 'Step '+st : '#'+i;
     })();
+
+    // parse key info
+    const frame = parseFrame(user);
+    const selfHp = parseSelfHP(user);
+    const enemyHp = parseEnemyHP(user);
+    const gold = parseGold(user);
+    const towers = parseTowers(user);
+    const think = parseThink(reply);
+    const macro = parseMacroActions(user);
     const ts = fmtTime(e.time);
+    const hpPct = selfHp ? (selfHp.hp / selfHp.maxHp * 100) : null;
+    const eHpPct = enemyHp ? (enemyHp.hp / enemyHp.maxHp * 100) : null;
+    const progPct = frame !== null ? ((frame - minFrame) / frameRange * 100) : 0;
 
     let statusClass = 'ok';
     if (isErr || e._parseError) statusClass = 'err';
@@ -239,37 +327,60 @@ function renderEntries() {
 
     const hasUser = !!user;
     const hasReply = !!reply;
+    const decision = think?.think?.decision || '';
+    const situation = think?.think?.situation || '';
+    const whatif1 = think?.think?.['whatif 1'] || think?.think?.['whatif_1'] || '';
+    const actionText = think?.action || '';
+    const review = think?.think?.review || '';
 
     return `<div class="entry${isErr?' highlight':''}" id="entry-${i}">
       <div class="entry-header" onclick="toggle(${i})">
-        <span class="step">${esc(stepLabel)}</span>
-        ${ts ? `<span class="frame">${ts}</span>` : ''}
-        <span class="status ${statusClass}"></span>
-        <span class="expand ${open?'open':''}">▼</span>
+        <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
+          <span class="step">${esc(stepLabel)}</span>
+          <span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:${PHASE_COLORS[phase]||'#555'};color:#fff;flex-shrink:0">${phase}</span>
+          <div style="flex:1;min-width:0;display:flex;align-items:center;gap:6px">
+            ${frame !== null ? `<span style="font-size:11px;color:var(--accent);min-width:48px">F${frame}</span>` : ''}
+            ${hpPct !== null ? `<span class="hp-mini" style="background:${hpPct>50?'var(--green)':hpPct>25?'var(--orange)':'var(--red)'};width:${Math.max(4,hpPct/3)}px;height:8px;border-radius:2px;display:inline-block"></span>` : ''}
+            ${eHpPct !== null ? `<span class="hp-mini" style="background:${eHpPct>50?'var(--green)':eHpPct>25?'var(--orange)':'var(--red)'};width:${Math.max(4,eHpPct/3)}px;height:8px;border-radius:2px;display:inline-block;opacity:0.6"></span>` : ''}
+            ${gold !== null ? `<span style="font-size:11px;color:var(--accent)">💰${gold}</span>` : ''}
+            <span style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(decision || actionText || '')}</span>
+          </div>
+          <div style="flex-shrink:0;display:flex;align-items:center;gap:6px">
+            <span class="status ${statusClass}"></span>
+            <span class="expand ${open?'open':''}">▼</span>
+          </div>
+        </div>
       </div>
       <div class="entry-body ${open?'open':''}">
-        ${hasUser ? `<div class="section"><div class="label"><span class="tag in">USER</span> 输入</div><div class="body">${esc(user)}</div></div>` : ''}
-        ${hasReply ? `<div class="section"><div class="label"><span class="tag out">OUT</span> 输出</div><div class="body">${esc(reply)}</div></div>` : ''}
-        ${result ? `<div class="section"><div class="label"><span class="tag result">RES</span> 解析结果</div><div class="body">${esc(result)}</div></div>` : ''}
-        ${!hasUser && !hasReply && !result ? '<div class="empty-body">（空记录）</div>' : ''}
-        ${e._parseError ? `<div class="section"><div class="label" style="color:var(--red)">⚠ 解析错误</div><div class="body" style="color:var(--red)">${esc(e._raw||'')}</div></div>` : ''}
+        ${frame !== null ? `<div style="height:3px;background:var(--surface2);border-radius:2px;margin-bottom:10px;overflow:hidden"><div style="height:100%;width:${progPct.toFixed(1)}%;background:var(--accent);border-radius:2px"></div></div>` : ''}
+        ${review ? `<div class="section"><div class="label">📋 Review</div><div class="body" style="background:var(--surface2);border-color:var(--border);font-size:12px">${esc(review)}</div></div>` : ''}
+        ${situation ? `<div class="section"><div class="label">📍 Situation</div><div class="body" style="background:var(--surface2);border-color:var(--border);font-size:12px">${esc(situation)}</div></div>` : ''}
+        ${whatif1 ? `<div class="section"><div class="label">🔮 WhatIf</div><div class="body" style="background:var(--surface2);border-color:var(--border);font-size:12px">${esc(whatif1)}</div></div>` : ''}
+        ${decision ? `<div class="section"><div class="label">🎯 Decision</div><div class="body" style="background:#1a2a1a;border-color:var(--green);font-size:12px">${esc(decision)}</div></div>` : ''}
+        ${actionText ? `<div class="section"><div class="label"><span class="tag out">ACTION</span></div><div class="body" style="background:#2a1a0a;border-color:#8a5a00;font-size:12px">${esc(actionText)}</div></div>` : ''}
+        ${macro?.blocked?.length ? `<div class="section"><div class="label">⛔ Blocked</div><div class="body" style="font-size:11px;color:var(--orange)">${esc(macro.blocked.join('\n'))}</div></div>` : ''}
+        ${result ? `<div class="section"><div class="label"><span class="tag result">RES</span></div><div class="body">${esc(result)}</div></div>` : ''}
+        <div class="section" style="margin-top:8px">
+          <div class="label" style="cursor:pointer;color:var(--muted);font-size:10px" onclick="event.stopPropagation();var d=this.nextElementSibling;d.style.display=d.style.display==='none'?'block':'none'">📄 全部数据</div>
+          <div style="display:${showRaw?'block':'none'}">
+            ${e.system_prompt ? `<div class="section"><div class="label"><span style="background:${PHASE_COLORS[e.phase]||'#555'};color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700">${e.phase}</span> SYS</div><div class="body" style="font-size:11px;background:var(--surface2)">${esc(e.system_prompt)}</div></div>` : ''}
+            ${hasUser ? `<div class="section"><div class="label"><span class="tag in">USER</span></div><div class="body" style="font-size:11px">${esc(user)}</div></div>` : ''}
+            ${hasReply ? `<div class="section"><div class="label"><span class="tag out">OUT</span> 完整回复</div><div class="body" style="font-size:11px">${esc(reply)}</div></div>` : ''}
+          </div>
+        </div>
+        ${e._parseError ? `<div class="section"><div class="label" style="color:var(--red)">⚠ 解析错误</div><div class="body" style="color:var(--red);font-size:11px">${esc(e._raw||'')}</div></div>` : ''}
       </div>
     </div>`;
   }).join('');
 
-  if (!html.trim() && !sysPanel) {
+  if (!html.trim() && searchQuery) {
+    content.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>无匹配结果</p></div>`;
+  } else if (!html.trim()) {
     content.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>无条目</p></div>`;
-  } else if (!html.trim() && searchQuery) {
-    content.innerHTML = sysPanel + `<div class="empty-state"><div class="icon">🔍</div><p>无匹配结果</p></div>`;
   } else {
-    content.innerHTML = sysPanel + html;
+    content.innerHTML = html;
   }
   document.getElementById('matchCount').textContent = searchQuery ? `${match}/${entries.length}` : '';
-}
-
-function toggleSys() {
-  sysOpen = !sysOpen;
-  renderEntries();
 }
 
 function toggle(i) {
@@ -282,19 +393,27 @@ function toggle(i) {
 
 function expandAll() {
   entries.forEach((_, i) => expanded.add(i));
-  sysOpen = true;
+  showRaw = true;
   renderEntries();
 }
 
 function collapseAll() {
   expanded.clear();
-  sysOpen = false;
+  showRaw = false;
   renderEntries();
 }
 
 function toggleFilter(type) {
   if (type === 'err') { filterErr = !filterErr; document.getElementById('btnFilterErr').classList.toggle('active'); }
   if (type === 'long') { filterLong = !filterLong; document.getElementById('btnFilterLong').classList.toggle('active'); }
+  renderEntries();
+}
+
+function setPhase(p) {
+  phaseFilter = p;
+  document.querySelectorAll('.toolbar button[id^="phase"]').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById(p === 'all' ? 'phaseAll' : 'phase' + p);
+  if (btn) btn.classList.add('active');
   renderEntries();
 }
 
