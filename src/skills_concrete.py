@@ -221,11 +221,19 @@ class Recall(Skill):
 class Farm(Skill):
     name = "FARM"
     def update(self):
-        """推进补兵，打架前开技能"""
+        """推进补兵，打架前开技能。已到中线附近+无战斗+无小兵=预期目的达成。"""
         ar = self.ctx.atk_range()
         mx, my = steer_toward(self.ctx.px, self.ctx.py, self.ctx.ex, self.ctx.ey)
         d = dist(self.ctx.px, self.ctx.py, self.ctx.ex, self.ctx.ey)
         soldiers_near = sum(1 for s in self.ctx.soldiers if dist(self.ctx.px, self.ctx.py, s['x'], s['z']) < ar)
+        m_low = self.ctx.nearest_low_hp_minion(hp_threshold=300)
+
+        # 预期目的达成：已到中线路段 + 无敌人可打 + 无残血兵可补
+        near_lane = abs(self.ctx.px) < 12000
+        no_fight = d > ar * 2 and soldiers_near == 0
+        no_last_hit = not m_low
+        if near_lane and no_fight and no_last_hit:
+            return self.ctx.make_move(mx, my), True
 
         # 0) 敌方在视野内(非FOW)且未贴身 → 大招先手晕眩(全图直线)
         if d > ar and d < 50000 and valid_btn(self.ctx.la, BTN_SKILL3):

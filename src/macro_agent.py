@@ -39,6 +39,7 @@ class MacroAgent:
         self.memory = memory_system
         self._last_llm_entry = None
         self._last_raw_llm = ""
+        self._last_skill_name = ""
         global traj_file, traj_path
         if not traj_file:
             traj_file = open(traj_path, "w", encoding="utf-8")
@@ -322,14 +323,15 @@ class MacroAgent:
         self.last_results_full = []
         for r in results:
             if r["type"] == "skill_call":
+                self._last_skill_name = f"{r['skill']}.{r['func']}()"
                 result = r.get("result", {})
                 if isinstance(result, dict):
-                    lines = [f"@SKILL_CALL {r['skill']}.{r['func']}()"]
+                    lines = [f"@SKILL_CALL {self._last_skill_name}"]
                     for k, v in result.items():
                         lines.append(f"  {k}: {v}")
                     self.last_results_full.append("\n".join(lines))
                 else:
-                    self.last_results_full.append(f"@SKILL_CALL {r['skill']}.{r['func']}() → {result}")
+                    self.last_results_full.append(f"@SKILL_CALL {self._last_skill_name} → {result}")
             elif r["type"] == "error":
                 self.last_results_full.append(f"ERROR: {r['msg']}")
 

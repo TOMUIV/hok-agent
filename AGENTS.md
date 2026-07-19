@@ -13,7 +13,7 @@ THU AI实践基石. LLM Agent 玩王者荣耀 1v1. 纯 prompt 工程, 零训练.
 
 ```
 src/                              # Git-tracked, gamecore-Docker version
-  main_macro.py, main.py          # Entrypoints
+  main_macro.py                   # **Active. Entrypoint** (MacroAgent + MemorySystem, runs in Docker)
   macro_agent.py                  # SYS1: frame-by-frame LLM decide(), builds TRENDS/DETAIL/DELTA memory
   memory.py                       # MemorySystem: retrieve() + reflect() (SYS2→SYS3→AUDIT pipeline)
   prompts.py                      # PROMPT_BASE + 4 protocols + 9 few-shot examples
@@ -30,9 +30,8 @@ src/                              # Git-tracked, gamecore-Docker version
   gamecore_data.py                # Reads gamecore config files at runtime
   pathfinding.py                  # A* pathfinding (used by strategy_executor)
   trajectory.py                   # JSONL step logger
-  seed_memory.py                  # 14 initial semantic rules from SM decision tree
 tests/                            # Test scripts (need gamecore-server + SDK)
-scripts/                          # AILab stubs setup/fix utilities
+scripts/                          # Setup scripts, AILab stubs, memory seed
 trajectories/                     # Per-game .jsonl logs + memory.json + serve.py + screenshot
 gamecore/                         # Gitignored. gamecore-server.exe (proprietary)
 ```
