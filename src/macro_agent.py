@@ -81,6 +81,8 @@ class MacroAgent:
             entry["parsed_results"] = llm_data.get("parsed_results", "")
         else:
             entry["phase"] = "skill"
+        if combat:
+            entry["combat"] = combat
         self.frame_buffer.append(entry)
         if len(self.frame_buffer) > FRAME_BUFFER_MAX:
             self.frame_buffer = self.frame_buffer[-FRAME_BUFFER_MAX:]
@@ -161,27 +163,29 @@ class MacroAgent:
         g_self_start = g_self_end = g_enemy_start = g_enemy_end = 0
         kills = deaths = 0
         skill_count = {}
+        dmg_taken_hero = 0; dmg_taken_tower = 0; dmg_dealt = 0; under_tower_cnt = 0
         for idx, f in enumerate(buf):
             d = f.get("delta", {})
             if d.get("self_pos"):
-                old = d["self_pos"]["old"]
                 pos_self.append((d["self_pos"]["new"][0], d["self_pos"]["new"][1]))
-            else:
-                old = None
             gs = d.get("self_gold", {}).get("new", 0)
             ge = d.get("enemy_gold", {}).get("new", 0)
             if idx == 0:
                 g_self_start = gs; g_enemy_start = ge
             g_self_end = gs; g_enemy_end = ge
-
             for ev in f.get("events", []):
                 if ev["type"] == "kill": kills += 1
                 if ev["type"] == "death": deaths += 1
-
             an = f.get("action_name", "")
             if an:
                 sk = an.split(".")[0] if "." in an else an
                 skill_count[sk] = skill_count.get(sk, 0) + 1
+            c = f.get("combat", {})
+            dmg_taken_hero += c.get("dmg_taken_hero", 0)
+            dmg_dealt += c.get("dmg_dealt_hero", 0)
+            if c.get("under_tower_fire"):
+                under_tower_cnt += 1
+                dmg_taken_tower += max(0, -c.get("dmg_taken_hp", 0) - c.get("dmg_taken_hero", 0))
 
         def _side_block(tag, pl, gs, ge, k, d, skc):
             lines = [f"--- {tag} ---"]
@@ -196,8 +200,9 @@ class MacroAgent:
             return "\n".join(lines)
 
         trend_self = _side_block("SELF", pos_self, g_self_start, g_self_end, kills, deaths, skill_count)
+        trend_combat = f"--- SELF_COMBAT ---\n  DMG_TAKEN: {dmg_taken_hero+dmg_taken_tower} (TOWER:{dmg_taken_tower} HERO:{dmg_taken_hero} MINION:{max(0,dmg_taken_hero-0)})\n  DMG_DEALT: {dmg_dealt}\n  UNDER_TOWER_FIRE: {'YES' if under_tower_cnt>0 else 'NO'}"
         trend_enemy = _side_block("ENEMY", pos_enemy, g_enemy_start, g_enemy_end, deaths, kills, {})
-        trend_text = trend_self + "\n\n" + trend_enemy
+        trend_text = trend_self + "\n\n" + trend_combat + "\n\n" + trend_enemy
         sections = [f"=== TRENDS (last {len(buf)} frames, {llm_frames} LLM calls) ===" + "\n" + trend_text]
 
         # EVENTS
@@ -242,6 +247,16 @@ class MacroAgent:
             if dh: sd.append(f"HP: {dh.get('old',0):.0f}→{dh.get('new',0):.0f} ({dh.get('diff',0):+.0f})")
             if dg: sd.append(f"GOLD: {dg.get('old',0):.0f}→{dg.get('new',0):.0f} ({dg.get('diff',0):+.0f})")
             if dp: sd.append(f"POS: ({dp.get('old',[0,0])[0]:.0f},{dp.get('old',[0,0])[1]:.0f})→({dp.get('new',[0,0])[0]:.0f},{dp.get('new',[0,0])[1]:.0f})")
+            # DMG line (from combat data)
+            c = f.get("combat", {})
+            dmg_parts = []
+            if c.get("under_tower_fire"): dmg_parts.append("TOWER")
+            if c.get("dmg_taken_hero", 0) > 0: dmg_parts.append(f"HERO({c['dmg_taken_hero']})")
+            if c.get("dmg_taken_hp", 0) and c.get("dmg_taken_hp", 0) < 0:
+                other = -c["dmg_taken_hp"] - c.get("dmg_taken_hero", 0)
+                if other > 0: dmg_parts.append(f"OTHER({other:.0f})")
+            if dmg_parts:
+                sd.append(f"DMG: {'+'.join(dmg_parts)}")
             sd.append(f"ITEMS: {di}")
             if deh: ed.append(f"HP: {deh.get('old',0):.0f}→{deh.get('new',0):.0f} ({deh.get('diff',0):+.0f})")
             if deg: ed.append(f"GOLD: {deg.get('old',0):.0f}→{deg.get('new',0):.0f} ({deg.get('diff',0):+.0f})")
@@ -283,6 +298,12 @@ class MacroAgent:
         # 1) concrete skill 还在执行中 → 不调 LLM，继续跑
         if self.executor._concrete_skill is not None:
             self._last_llm_entry = None
+            # 伤害中断：非 no_interrupt 技能遇到伤害 -> 打断，让 LLM 重新决策
+            if not getattr(self.executor._concrete_skill, 'no_interrupt', False) and self._has_new_damage(s.get("req_pb")):
+                self._last_hp = None
+                self.executor._concrete_skill = None
+                action, _ = self.executor.step(s)
+                return action, "skill_interrupted"
             action, _ = self.executor.step(s)
             return action, "skill_continue"
 

@@ -127,6 +127,7 @@ prev_pb = None
 prev_events = {}
 prev_hp_self = prev_hp_enemy = None
 prev_gold_self = None
+prev_dmg_hero = prev_dmg_dealt = None
 
 retries = 0
 while not gameover and decisions < MAX_DECISIONS and retries < 50:
@@ -195,6 +196,23 @@ while not gameover and decisions < MAX_DECISIONS and retries < 50:
         events.append({"frame": frame, "type": "gold_spike", "delta": cg_s - prev_gold_self})
     prev_hp_self, prev_hp_enemy, prev_gold_self = chp_s, chp_e, cg_s
 
+    # combat data from protobuf
+    combat = {}
+    if cur_pb:
+        for hh in getattr(cur_pb, 'hero_list', []):
+            if getattr(hh, 'config_id', 0) == HERO_AI:
+                combat["under_tower_fire"] = bool(getattr(hh, 'is_hero_under_tower_atk', False))
+                combat["dmg_taken_hp"] = delta.get("self_hp", {}).get("diff", 0)
+                dmg_hero = getattr(hh, 'totalBeHurtByHero', 0)
+                dmg_dealt = getattr(hh, 'totalHurtToHero', 0)
+                if prev_dmg_hero is not None:
+                    combat["dmg_taken_hero"] = max(0, dmg_hero - prev_dmg_hero)
+                if prev_dmg_dealt is not None:
+                    combat["dmg_dealt_hero"] = max(0, dmg_dealt - prev_dmg_dealt)
+                prev_dmg_hero = dmg_hero
+                prev_dmg_dealt = dmg_dealt
+                break
+
     # push frame
     action_name = f"{BUTTON_NAMES[action[0]]}" if action[0] < len(BUTTON_NAMES) else f"btn{action[0]}"
     is_llm = raw not in ("skill_continue",)
@@ -207,7 +225,7 @@ while not gameover and decisions < MAX_DECISIONS and retries < 50:
                      "parsed_results": "\n".join(agent.last_results_full) if agent.last_results_full and not is_err else ""}
         if is_err:
             llm_data["error"] = raw
-    agent.push_frame(frame, action_name, action, delta, events, llm_data=llm_data)
+    agent.push_frame(frame, action_name, action, delta, events, llm_data=llm_data, combat=combat)
 
     # write JSONL
     phase = "llm" if llm_data else "skill"

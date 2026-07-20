@@ -346,7 +346,6 @@ class Kite(Skill):
     name = "KITE"
     no_interrupt = True
     def update(self):
-        """Kite backward toward tower. Done when safe under tower or enemy stops chasing.
         camp = self.ctx.camp()
         safe_x = -20000 if camp < 0 else 20000
         if (camp < 0 and self.ctx.px < safe_x) or (camp > 0 and self.ctx.px > safe_x):
@@ -410,7 +409,6 @@ class Defend(Skill):
     name = "DEFEND"
     no_interrupt = False
     def update(self):
-        """DEFEND: 清兵优先，用技能清更快"""
         ar = self.ctx.atk_range()
         d_enemy = dist(self.ctx.px, self.ctx.py, self.ctx.ex, self.ctx.ey)
         soldiers_near = sum(1 for s in self.ctx.soldiers if dist(self.ctx.px, self.ctx.py, s['x'], s['z']) < ar)
