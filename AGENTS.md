@@ -6,34 +6,47 @@ THU AI实践基石. LLM Agent 玩王者荣耀 1v1. 纯 prompt 工程, 零训练.
 
 | Priority | File | Role |
 |----------|------|------|
-| 1 | `src/main_macro.py` | **Active.** MacroAgent + MemorySystem, runs in Docker |
-| 2 | `src_v2/` | Local-only (gitignored). MockEnv, web UI (FastAPI :13187), newer dev work |
+| 1 | `src/main_macro.py` | **Active.** MacroAgent + MemorySystem + strategy executor, runs in Docker |
+| `start.bat` | Convenience: starts gamecore-server then runs agent in container |
+
+`src_v2/` has been removed from the repo (archived). The old `src/main.py`, `agent.py`, `react_agent.py`, `mock_env.py`, `web_demo.py` no longer exist — replaced by the macro_agent architecture in `src/`. README is stale and documents the old v1 code.
 
 ## Source Layout
 
 ```
 src/                              # Git-tracked, gamecore-Docker version
-  main_macro.py                   # **Active. Entrypoint** (MacroAgent + MemorySystem, runs in Docker)
+  main_macro.py                   # Entrypoint (MacroAgent + post-game reflect)
   macro_agent.py                  # SYS1: frame-by-frame LLM decide(), builds TRENDS/DETAIL/DELTA memory
   memory.py                       # MemorySystem: retrieve() + reflect() (SYS2→SYS3→AUDIT pipeline)
-  prompts.py                      # PROMPT_BASE + 4 protocols + 9 few-shot examples
+  prompts.py                      # PROMPT_BASE + 4 protocols + build_full_prompt()
   state_parser.py                 # Protobuf → text state + MACRO ACTIONS (AVAILABLE/BLOCKED)
   strategy_executor.py            # @SKILL_CALL parser → 6-tuple, routes to skills_concrete.py
-  skills_concrete.py              # Multi-frame concrete skills (Farm/Poke/AllIn/Kite/etc)
-  skills/                         # @register_skill doc-only (PROMPT skilldoc generation)
-    farm.py, poke.py, all_in.py
-    defend.py, kite.py, retreat.py
-    stand_and_shoot.py, system_help.py
+  skills_concrete.py              # Multi-frame concrete skills (Farm/Poke/AllIn/Kite/Defend/Retreat/Pursue/MoveTo/AttackTarget/Recall/UseSkill)
+  skills/                         # @register_skill doc-only (generated into PROMPT skilldoc)
   skill_base.py                   # SKILL_REGISTRY + @register_skill decorator
-  hero_db.py, hero_skills.py      # Hero ID mapping + per-hero skill configs
+  hero_db.py                      # Hero ID → Chinese name mapping
+  hero_skills.py                  # Per-hero config (poke/combo/escape/items). Only 5 heroes defined: 132, 169, 199, 141, 107
   skill_db.py                     # HUMANTIC matchup + combo/wave/positioning rules
-  gamecore_data.py                # Reads gamecore config files at runtime
-  pathfinding.py                  # A* pathfinding (used by strategy_executor)
+  gamecore_data.py                # Reads gamecore config files at runtime (hero_skill_info.txt, equipment_config_id.txt, etc.)
+  pathfinding.py                  # A* pathfinding (used by make_move_to())
   trajectory.py                   # JSONL step logger
-tests/                            # Test scripts (need gamecore-server + SDK)
-scripts/                          # Setup scripts, AILab stubs, memory seed
-trajectories/                     # Per-game .jsonl logs + memory.json + serve.py + screenshot
+tests/                            # Standalone test scripts (need gamecore-server + SDK running). No test framework.
+  test_*.py                       # Some are .gitignored (test_agent, test_final_OK, test_full_flow, test_minimal, test_reset)
+scripts/                          # Setup scripts, AILab stubs, seed_memory.py
+  setup_ailab.py, fix_ailab.py    # Run after container rebuild to create AILab stub files
+  seed_memory.py                  # Seeds memory.json with initial 14 SEMANTIC rules (loaded after first game)
+trajectories/                     # Per-game .jsonl logs + memory.json + serve.py + index.html + screenshot
+  serve.py                        # Trajectory browser: python serve.py <port> (e.g. 23456)
+  memory.json                     # MemorySystem persistent store (auto-loaded/saved)
 gamecore/                         # Gitignored. gamecore-server.exe (proprietary)
+src_copy/                         # Backup dir (not git-tracked). Mix of old v1 + new macro_agent files
+```
+
+## Dependencies
+
+No package manager. Install manually:
+```
+pip install openai fastapi uvicorn numpy python-dotenv
 ```
 
 ## Commands (Docker)
@@ -45,7 +58,7 @@ Start-Process -WindowStyle Hidden -FilePath "gamecore\gamecore\gamecore-server.e
 # Run agent in container
 docker exec hok bash -c "cd /hok_env/hok/hok1v1 && python3 -u /workspace/src/main_macro.py --decisions 10 --hero-ai 199 --hero-bot 169"
 
-# Options: --max-tokens 4096 (default 400), --no-thinking (disable reasoning)
+# Options: --max-tokens 4096 (default 2048), --no-thinking (disable reasoning), --print-every N
 # Example: python3 -u /workspace/src/main_macro.py --decisions 10 --hero-ai 169 --hero-bot 112 --max-tokens 4096 --no-thinking
 
 # Trajectory browser
@@ -55,7 +68,7 @@ python trajectories/serve.py 23456
 taskkill /f /im gamecore-server.exe && docker stop hok
 ```
 
-Do NOT `docker rm -f hok` (rebuilding re-installs all deps + AILab files).
+Do NOT `docker rm -f hok` (rebuilding re-installs all deps + AILab files). Use `docker stop` / `docker start`.
 
 ## `.env` Required
 
@@ -65,7 +78,39 @@ DASHSCOPE_BASE_URL=https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mo
 MODEL_NAME=deepseek-v4-flash
 ```
 
-Current `.env` uses `token-plan` (internal proxy), not raw DashScope URL.
+Current `.env` uses `token-plan` (internal proxy), not raw DashScope URL. Do NOT change to the public DashScope endpoint.
+
+## Architecture
+
+```
+Game Environment (Windows Host + Docker Container)
+  ├─ gamecore-server.exe ←HTTP:23432/ZMQ:35500→ Docker (HoK SDK)
+  │
+  ├─ [Ingame Loop - every frame]
+  │   Game State → SYS1: MacroAgent → <think 5-sections> + <action @SKILL_CALL>
+  │     → Strategy Executor → 6-tuple (btn, mx, my, sx, sy, target) → gamecore
+  │   LLM NEVER directly touches gamecore (safety abstraction).
+  │
+  ├─ Trajectory JSONL → Event Detection
+  │   events: kill / death / tower_fall / gold_spike / power_spike / minion_wave
+  │
+  ├─ [Post-game × per event] → SYS2: Event Analysis (BEFORE/AFTER 100 frames) → BUFFER
+  ├─ [Post-game × once]      → SYS3: Game Review (full match)              → BUFFER
+  └─ [Post-game × once]      → AUDIT: score DB + BUFFER (1/-1/0)
+       → Score=1 → Similarity Check → DB (memory.json)
+       → Score=0/-1 → DISCARD
+```
+
+Memory System (Episodic + Semantic + Humanic) feeds into SYS1 via `retrieve()`.
+
+Prompt assembly: `PROMPT_BASE + EXPERIENCE + PROTOCOL + TRENDS + EVENTS + DETAIL + MACRO_ACTIONS + few-shot`
+
+`<think>` has 5 sections: **Review / WhatIf check / Situation / WhatIf 1-2 / Decision**.
+`MACRO_ACTIONS` lists which sub-functions are **AVAILABLE** vs **BLOCKED** (with reasons like cooldown/range/FOW).
+
+SYS2/SYS3: not required to output. When they do: `REFERENCE EPISODIC` / `NEW EPISODIC (Case: Context+Lesson)` / `REFERENCE SEMANTIC` / `NEW SEMANTIC`.
+
+AUDIT scores: `1` (validates), `-1` (contradicts), `0` (not tested). Each score needs a reason. HUMANTIC entries are reference only and never scored.
 
 ## Skill System
 
@@ -73,20 +118,9 @@ Current `.env` uses `token-plan` (internal proxy), not raw DashScope URL.
 - `@SKILL_CALL Skill.func()` parser in `strategy_executor.py`. Routes to `skills_concrete.py` (multi-frame execution).
 - `skills/` files are **doc-only** (generated into PROMPT skilldoc via `@register_skill`). Execution goes to `skills_concrete.py`.
 - `skills_concrete.py`: Multi-frame concrete skills with `_start()` + `update()` → `(action, done)`. LLM calls once, executor loops until `done`.
-- `SkillContext` (helpers: `make_move`, `make_attack`, `make_skill`, `valid_btn`, `dist_to_enemy`) initialized from protobuf each frame.
-- Per-hero skill config in `hero_skills.py` (`poke_skill`, `combo_priority`, `skill_ranges`, `item` list) — used by skills and state_parser.
-- A* pathfinding in `make_move_to()` avoids organ obstacles.
-
-## Architecture
-
-```
-SYS1 (ingame, every frame)     → 6-tuple action via strategy_executor → skills_concrete multi-frame
-SYS2 (post-game, per event)    → BUFFER (episodic + semantic candidates)
-SYS3 (post-game, ×1 review)    → BUFFER
-AUDIT (post-game, ×1)          → score BUFFER + DB, merge into memory.json
-```
-
-Prompt: `PROMPT_BASE + hero_info + skilldoc + experience + PROTOCOL + few-shot`
+- `SkillContext` (helpers: `make_move`, `make_attack`, `make_skill`, `valid_btn`, `dist_to_enemy`, `nearest_low_hp_minion`) initialized from protobuf each frame.
+- Per-hero skill config in `hero_skills.py` (`poke_skill`, `combo_priority`, `skill_ranges`, `skill_types`, `items`). Only heroes **132, 169, 199, 141, 107** have custom configs; others use default fallback.
+- A* pathfinding in `SkillContext.make_move_to()` avoids organ obstacles.
 
 ## Memory System
 
@@ -109,6 +143,10 @@ Prompt: `PROMPT_BASE + hero_info + skilldoc + experience + PROTOCOL + few-shot`
 - **Map**: Blue (camp=0) at -X, Red (camp=1) at +X. Spawn ≈-32308 / +100000.
 - **Container CWD**: MUST be `/hok_env/hok/hok1v1` — SDK resolves `config.dat` relatively.
 - **AILab stubs**: `main_macro.py` creates them inline; run `scripts/setup_ailab.py` or `scripts/fix_ailab.py` after container rebuild.
-- **ITEM data**: Not from protobuf; `hero_skills.py` has per-hero item lists, `gamecore_data.py` reads equipment_config_id.txt.
+- **ITEM data**: Not from protobuf; `hero_skills.py` has per-hero item lists, `gamecore_data.py` reads `equipment_config_id.txt`.
 - **No test framework**: `tests/test_*.py` are standalone scripts requiring gamecore-server + SDK; run from project root.
-- **README.md is stale**: Commands/architecture there predates macro_agent + memory system. Trust AGENTS.md.
+- **README.md is stale**: Documents old v1 architecture (`main.py`, `agent.py`, `react_agent.py`, `mock_env.py`, `web_demo.py`). None of these files exist in `src/`. Trust AGENTS.md.
+- **hero_skills.py**: Only 5 heroes fully configured (132 MarcoPolo, 169 HouYi, 199 GongsunLi, 141 DiaoChan, 107 ZhaoYun). Other heroes get default fallback behavior.
+- **DASHSCOPE_BASE_URL** uses `token-plan` proxy — raw DashScope URL will NOT work.
+- **Gamecore data files**: `gamecore_data.py` reads from `core_assets/customresources/ailab/ai_config/1v1/`. If gamecore paths change, `GAMECORE_PATHS` in that file needs updating.
+- **Trajectories accumulate**: Each game creates a `.jsonl` in `trajectories/`. 70+ already exist. Clean manually.

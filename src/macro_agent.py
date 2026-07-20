@@ -40,6 +40,7 @@ class MacroAgent:
         self._last_llm_entry = None
         self._last_raw_llm = ""
         self._last_skill_name = ""
+        self._last_hp = None
         global traj_file, traj_path
         if not traj_file:
             traj_file = open(traj_path, "w", encoding="utf-8")
@@ -47,7 +48,25 @@ class MacroAgent:
         exp = self.memory.retrieve(self_hero_id, enemy_hero_id) if self.memory else None
         self.system_prompt = build_full_prompt(self_hero_id, enemy_hero_id, PROMPT_SYS1_PROTOCOL, experience=exp)
 
-    def push_frame(self, frame, action_name, action_tuple, delta, events, llm_data=None):
+    def _has_new_damage(self, pb=None):
+        """Check if the hero is taking meaningful damage this frame."""
+        if not pb:
+            return False
+        h = None
+        for hh in getattr(pb, 'hero_list', []):
+            if getattr(hh, 'config_id', 0) == self.self_hero_id:
+                h = hh; break
+        if not h:
+            return False
+        under_tower = getattr(h, 'is_hero_under_tower_atk', False)
+        if under_tower:
+            return True
+        hp = getattr(h, 'hp', 0)
+        if self._last_hp and self._last_hp - hp > 50:
+            return True
+        return False
+
+    def push_frame(self, frame, action_name, action_tuple, delta, events, llm_data=None, combat=None):
         """Record one frame into frame_buffer.
         delta = {self_hp, self_gold, self_pos, enemy_hp, enemy_gold, enemy_pos, tower}
         events = [{type, frame}]

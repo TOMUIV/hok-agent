@@ -121,6 +121,17 @@ RULES:
 - All distance values use the same game units. Compare them directly.
 - MACRO ACTIONS shows which sub-functions are available or blocked and why.
 
+=== DAMAGE HANDLING ===
+When you take damage (especially TOWER fire), the current skill will be INTERRUPTED
+and control returns to you. This lets you react to danger (retreat, dodge).
+
+EXCEPTION: Combat skills (ALL_IN, KITE, RETREAT, PURSUE) are marked CONTINUOUS.
+They will NOT be interrupted by damage. Use them when you need to execute
+a full combo (e.g. Skill3->Skill1->Skill2) even while taking hits.
+
+Why interrupt? Standing still under tower fire = death.
+Why continuous? A combo needs uninterrupted execution to maximize damage.
+
 Output format:
 === THINK ===
   Review: what happened in the last few frames (HP changes, skills used, enemy movement)

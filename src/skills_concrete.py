@@ -220,6 +220,7 @@ class Recall(Skill):
 
 class Farm(Skill):
     name = "FARM"
+    no_interrupt = False
     def update(self):
         """推进补兵，打架前开技能。已到中线附近+无战斗+无小兵=预期目的达成。"""
         ar = self.ctx.atk_range()
@@ -265,6 +266,7 @@ class Farm(Skill):
 
 class Poke(Skill):
     name = "POKE"
+    no_interrupt = False
     def update(self):
         """Step forward, use poke skill, step back. Stay near lane center."""
         ar = self.ctx.atk_range()
@@ -301,8 +303,10 @@ class Poke(Skill):
 
 class AllIn(Skill):
     name = "ALL_IN"
+    no_interrupt = True
     def _start(self):
         self.combo_idx = 0
+        self._skill_used = False
     def update(self):
         cfg = self.ctx.hero_config
         d = dist(self.ctx.px, self.ctx.py, self.ctx.ex, self.ctx.ey)
@@ -340,8 +344,9 @@ class AllIn(Skill):
 
 class Kite(Skill):
     name = "KITE"
+    no_interrupt = True
     def update(self):
-        """Move backward toward own tower, attack if enemy in range. Don't overshoot past base."""
+        """Kite backward toward tower. Done when safe under tower or enemy stops chasing.
         camp = self.ctx.camp()
         safe_x = -20000 if camp < 0 else 20000
         if (camp < 0 and self.ctx.px < safe_x) or (camp > 0 and self.ctx.px > safe_x):
@@ -368,6 +373,7 @@ class Kite(Skill):
 
 class Retreat(Skill):
     name = "RETREAT"
+    no_interrupt = True
     def update(self):
         """Walk directly to spawn center. No stopping until arrival."""
         camp = self.ctx.camp()
@@ -383,6 +389,7 @@ class Retreat(Skill):
 
 class Pursue(Skill):
     name = "PURSUE"
+    no_interrupt = True
     def update(self):
         d = dist(self.ctx.px, self.ctx.py, self.ctx.ex, self.ctx.ey)
         mx, my = direction_to(self.ctx.px, self.ctx.py, self.ctx.ex, self.ctx.ey)
@@ -401,6 +408,7 @@ class Pursue(Skill):
 
 class Defend(Skill):
     name = "DEFEND"
+    no_interrupt = False
     def update(self):
         """DEFEND: 清兵优先，用技能清更快"""
         ar = self.ctx.atk_range()
