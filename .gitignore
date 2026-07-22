@@ -51,10 +51,7 @@ bak/
 *.jpeg
 *.yml
 
-# Trajectory data (auto-generated)
-trajectories/trajectory_*.jsonl
-trajectories/trajectory_*_reflect.log
-trajectories/memory.json
+# Trajectory screenshots
 trajectories/screenshot*.png
 web_url.txt
 

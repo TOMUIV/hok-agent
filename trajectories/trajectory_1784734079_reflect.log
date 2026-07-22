@@ -1,0 +1,68 @@
+[SYS2] no events detected
+[SYS3] 5 LLM decisions to review...
+  [SYS3] F0 [SEM] game start, no enemies visible, first wave not yet spawned -> MOVE_TO toward own outer tower coordinates, not lane center, to ensure efficient pathing.
+  [SYS3] F0 [EPI] Context: Game start, both heroes at spawn. LLM predicted MOVE_TO(lane center) would arrive before minions clash. Actually the path was non-direct: hero first m | Lesson: At game start, use MOVE_TO with explicit coordinates toward the outer tower area (e.g., -11240, -11228) rather than lane center (0,0). This ensures a direct path to the wave meeting point. @MOVE_TO.st
+  [SYS3] F0 Summary: 1 EPI + 1 SEM
+  [SYS3] F240 [SEM] frame < 460 and no enemy visible -> MOVE_TO to safe position near own tower side (x < 0) then WAIT. Do not cross lane center.
+  [SYS3] F240 [EPI] Context: SELF at full HP, no enemy visible, moving toward lane center. LLM predicted MOVE_TO to (0,0) was safe positioning. Actually kept walking past center a | Lesson: When no enemies or minions are visible, do not MOVE_TO past the safe lane center (~0,0). Use WAIT or MOVE_TO to a safe position near own tower side of center. Walking into enemy territory before minio
+  [SYS3] F240 Summary: 1 EPI + 1 SEM
+  [SYS3] F324 [SEM] self position past (15000, 5000) (approaching enemy outer tower) and minions not yet spawned (frame < 460) -> RETREAT toward own tower immediately, do not walk deeper into enemy territory
+  [SYS3] F324 [EPI] Context: LLM was at POS:17800,6972 (deep in enemy territory, past the lane center) at F324, still moving forward toward enemy tower. Enemy was visible at POS:1 | Lesson: When already past lane center and approaching enemy tower range, do not continue MOVE_TO forward. Instead, immediately RETREAT toward own tower. Use @SKILL_CALL RETREAT.step() to disengage before taki
+  [SYS3] F324 Summary: 1 EPI + 1 SEM
+  [SYS3] F327 [EPI] Context: SELF at POS(17563,6869) with HP 2808/3182, behind enemy tower (enemy outer tower at ~11285,11275). Enemy LuBan7 at full HP 3401 visible. LLM predicted | Lesson: When behind enemy tower, do not RETREAT straight back through tower range. First MOVE_TO laterally out of tower range (perpendicular to lane), then RETREAT toward own base. Use DODGE if a dash skill i
+  [SYS3] F327 Summary: 1 EPI + 0 SEM
+  [SYS3] F588 [SEM] at spawn with HP below 90% and no enemy nearby -> WAIT at spawn to regen to safe HP threshold before returning to lane, rather than RECALL which wastes time since already at spawn.
+  [SYS3] F588 Summary: 0 EPI + 1 SEM
+[SYS4] checking 5 decisions against win goal...
+  [SYS4] F240 [GOAL] Position ahead of the minion wave to secure first-wave last-hit gold and lane control.
+  [SYS4] F240 [SEM] before first minion wave spawns (F < 460) and position near lane center (0,0) -> WAIT() to hold position; do not cross into enemy territory.
+  [SYS4] F240 [EPI] Context: Hero walked from blue spawn past lane center (0,0) and continued toward enemy territory before minions spawned. Reached enemy tower range and took dam | Lesson: Before minion wave spawns (before ~F460), stop MOVE_TO at lane center (0,0) and use WAIT() to hold position. Do not cross into enemy half of the map without minions.
+  [SYS4] F240 Summary: Goal: Position ahead of the minion wave to secure first-wave last-hit gold and lane control. | 1 EPI + 1 SEM
+  [SYS4] F324 [GOAL] Move toward lane center to be in position for the first minion wave at frame ~460.
+  [SYS4] F324 [SEM] pre-minion phase and moving toward lane -> MOVE_TO toward (0,0) or (5000,5000) max, then WAIT. Do not walk past enemy half of map before minions arrive.
+  [SYS4] F324 [EPI] Context: Pre-minion phase (F225-324). Hero walked from blue spawn past lane center to ~+17000 on enemy side, took damage, then retreated with heavy HP loss. Mi | Lesson: When moving to lane pre-wave, stop at or slightly past lane center (0,0). Do not walk past ~5000 units toward enemy side. Use WAIT or MOVE_TO with a specific coordinate near (0,0) to hold position. Ov
+  [SYS4] F324 Summary: Goal: Move toward lane center to be in position for the first minion wave at frame ~460. | 1 EPI + 1 SEM
+  [SYS4] F327 [GOAL] Disengage from a dangerous position behind the enemy tower after taking damage.
+  [SYS4] F327 [EPI] Context: Player walked deep behind enemy tower (pos 17563,6869) pre-minion-spawn. HP dropped to 2808. Enemy full HP. Chose RETREAT correctly. | Lesson: When behind enemy tower before minions spawn, RETREAT immediately. Tower aggro + enemy poke is lethal. Do not advance past enemy outer tower without minion wave to tank.
+  [SYS4] F327 Summary: Goal: Disengage from a dangerous position behind the enemy tower after taking damage. | 1 EPI + 0 SEM
+  [SYS4] F588 [GOAL] Return to full HP safely before re-engaging in lane.
+  [SYS4] F588 [SEM] HP between 30% and 60% and near own outer tower -> MOVE_TO(outer_tower) then WAIT() to regen while maintaining lane proximity
+  [SYS4] F588 [EPI] Context: At 54% HP, retreated all the way to spawn instead of stopping at outer tower. Enemy pushed wave and damaged tower during the long return trip. | Lesson: When HP is 30-60% and safe under outer tower, use MOVE_TO(outer_tower) then WAIT() to regen while staying close enough to farm. Only recall to spawn when below 15% HP or under immediate threat.
+  [SYS4] F588 Summary: Goal: Return to full HP safely before re-engaging in lane. | 1 EPI + 1 SEM
+[SYS3_global] full match review...
+  [SYS3_global] [SEM] enemy visible in lane ahead while moving forward -> POKE to trade damage instead of walking into poke range.
+  [SYS3_global] [SEM] HP drops below 70% from enemy poke while advancing -> RETREAT toward own tower to reset.
+  [SYS3_global] [SEM] overshot past lane center with no minions present -> RETREAT back to safe position near own tower.
+  [SYS3_global] [EPI] Context: LLM used MOVE_TO to walk past lane center all the way to enemy side (pos ~17000,~6400 at F321). Enemy LuBan7 was visible from F312 onward. LLM never a | Lesson: When enemy is visible ahead in lane, do not blindly MOVE_TO past center. Instead, POKE or ATTACK to establish pressure and avoid free damage.
+  [SYS3_global] Summary: 1 EPI + 3 SEM
+[SYS4_global] global goal alignment...
+  [SYS4_global] [SEM] minions visible and in range -> CLEAR or LAST_HIT, not MOVE_TO
+  [SYS4_global] [SEM] enemy visible and in attack range -> ATTACK or POKE, not MOVE_TO
+  [SYS4_global] [SEM] any frame after minions spawn -> must use an offensive skill, not just MOVE_TO
+  [SYS4_global] [EPI] Context: From frame 0 to 588, the LLM only used MOVE_TO. It walked from blue spawn to red spawn area, then back to blue spawn area, never once using ATTACK, PO | Lesson: Walking without purpose does not progress the game. When minions are present, must use CLEAR or LAST_HIT. When enemy is visible, must use POKE or ATTACK. When in lane, must push. Never default to MOVE
+  [SYS4_global] Summary: 1 EPI + 3 SEM
+[AUDIT] DB: 0 episodic + 20 semantic
+[AUDIT] Buffer: 23 new candidates
+  [AUDIT] Buffer [SEM] game start, no enemies visible, first wave not yet spawned -> MOVE_TO toward own outer tower coordinates, not lane cente
+  [AUDIT] Buffer [EPI] At game start, use MOVE_TO with explicit coordinates toward the outer tower area (e.g., -11240, -11228) rather than lane
+  [AUDIT] Buffer [SEM] frame < 460 and no enemy visible -> MOVE_TO to safe position near own tower side (x < 0) then WAIT. Do not cross lane ce
+  [AUDIT] Buffer [EPI] When no enemies or minions are visible, do not MOVE_TO past the safe lane center (~0,0). Use WAIT or MOVE_TO to a safe p
+  [AUDIT] Buffer [SEM] self position past (15000, 5000) (approaching enemy outer tower) and minions not yet spawned (frame < 460) -> RETREAT to
+  [AUDIT] Buffer [EPI] When already past lane center and approaching enemy tower range, do not continue MOVE_TO forward. Instead, immediately R
+  [AUDIT] Buffer [EPI] When behind enemy tower, do not RETREAT straight back through tower range. First MOVE_TO laterally out of tower range (p
+  [AUDIT] Buffer [SEM] at spawn with HP below 90% and no enemy nearby -> WAIT at spawn to regen to safe HP threshold before returning to lane, 
+  [AUDIT] Buffer [SEM] before first minion wave spawns (F < 460) and position near lane center (0,0) -> WAIT() to hold position; do not cross i
+  [AUDIT] Buffer [EPI] Before minion wave spawns (before ~F460), stop MOVE_TO at lane center (0,0) and use WAIT() to hold position. Do not cros
+  [AUDIT] Buffer [SEM] pre-minion phase and moving toward lane -> MOVE_TO toward (0,0) or (5000,5000) max, then WAIT. Do not walk past enemy ha
+  [AUDIT] Buffer [EPI] When moving to lane pre-wave, stop at or slightly past lane center (0,0). Do not walk past ~5000 units toward enemy side
+  [AUDIT] Buffer [EPI] When behind enemy tower before minions spawn, RETREAT immediately. Tower aggro + enemy poke is lethal. Do not advance pa
+  [AUDIT] Buffer [SEM] HP between 30% and 60% and near own outer tower -> MOVE_TO(outer_tower) then WAIT() to regen while maintaining lane prox
+  [AUDIT] Buffer [EPI] When HP is 30-60% and safe under outer tower, use MOVE_TO(outer_tower) then WAIT() to regen while staying close enough t
+  [AUDIT] Buffer [SEM] enemy visible in lane ahead while moving forward -> POKE to trade damage instead of walking into poke range.
+  [AUDIT] Buffer [SEM] HP drops below 70% from enemy poke while advancing -> RETREAT toward own tower to reset.
+  [AUDIT] Buffer [SEM] overshot past lane center with no minions present -> RETREAT back to safe position near own tower.
+  [AUDIT] Buffer [EPI] When enemy is visible ahead in lane, do not blindly MOVE_TO past center. Instead, POKE or ATTACK to establish pressure a
+  [AUDIT] Buffer [SEM] minions visible and in range -> CLEAR or LAST_HIT, not MOVE_TO
+  [AUDIT] Buffer [SEM] enemy visible and in attack range -> ATTACK or POKE, not MOVE_TO
+  [AUDIT] Buffer [SEM] any frame after minions spawn -> must use an offensive skill, not just MOVE_TO
+  [AUDIT] Buffer [EPI] Walking without purpose does not progress the game. When minions are present, must use CLEAR or LAST_HIT. When enemy is 

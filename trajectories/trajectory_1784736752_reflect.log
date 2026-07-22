@@ -1,0 +1,68 @@
+[SYS2] no events detected
+[SYS3] 5 LLM decisions to review...
+  [SYS3] F0 [SEM] game start frame 0 -> MOVE_TO.step(0,0) with explicit coordinates, not direction-based MOVE_TO.go()
+  [SYS3] F0 [EPI] Context: Game start frame 0. LLM chose MOVE_TO toward lane center (0,0) predicting arrival before minions clash. However, the hero path wandered erratically (m | Lesson: At game start, use MOVE_TO.step(0,0) with explicit coordinates rather than direction-based movement to ensure a straight-line path to lane center.
+  [SYS3] F0 Summary: 1 EPI + 1 SEM
+  [SYS3] F240 [SEM] frame < 460 (before minion spawn) -> MOVE_TO toward lane center, then WAIT. Do not use LAST_HIT.
+  [SYS3] F240 [EPI] Context: SELF at full HP, moving toward lane center from F140-F240. At F240, minion wave has not yet spawned (first wave at F460). LLM chose LAST_HIT() which r | Lesson: Before minions spawn (F460), LAST_HIT() is useless. Use MOVE_TO toward lane center to position, then WAIT or POKE once enemy is visible. Do not blindly walk past center into enemy territory.
+  [SYS3] F240 Summary: 1 EPI + 1 SEM
+  [SYS3] F243 [EPI] Context: SELF at full HP (3182), enemy FOW (HP=1 meaning just respawned). LLM chose MOVE_TO toward enemy outer tower area. Result: walked all the way to (9786, | Lesson: When enemy just respawned (HP=1), do not MOVE_TO past center. Instead, LAST_HIT near your own tower to let the wave push toward you safely.
+  [SYS3] F243 Summary: 1 EPI + 0 SEM
+  [SYS3] F291 [SEM] self position past center line (x > 0) and enemy FOW -> RETREAT toward own side, do not MOVE_TO deeper into enemy territory
+  [SYS3] F291 [EPI] Context: SELF walked from BLUE side all the way to (9249,8175) over 100 frames, past the center line, with enemy FOW. LLM predicted MOVE_TO toward enemy outer  | Lesson: When walking deep past center toward enemy tower area, do not assume safe even if enemy is FOW. Enemy can appear from fog at any time. Use POKE or WAIT near center line instead of blindly MOVE_TO into
+  [SYS3] F291 Summary: 1 EPI + 1 SEM
+  [SYS3] F294 [SEM] LAST_HIT returns "Move" (no minions in range) and position is past center (0,0) -> RETREAT toward own base immediately, do not continue advancing
+  [SYS3] F294 [EPI] Context: SELF walked continuously from F195 to F294, moving from (-6356,-8084) to (9786,8694) - crossing the entire map center and deep into enemy territory. E | Lesson: When no minions are visible and LAST_HIT returns "Move", do not continue advancing. Immediately use RETREAT to return to safe position near own tower. Walking blindly into enemy territory without visi
+  [SYS3] F294 Summary: 1 EPI + 1 SEM
+[SYS4] checking 5 decisions against win goal...
+  [SYS4] F240 [GOAL] Farm gold by last-hitting minions to build early economy advantage.
+  [SYS4] F240 [SEM] frame_no < 460 and position near lane center -> WAIT to hold position safely until minions spawn
+  [SYS4] F240 [EPI] Context: Hero reached lane center (~0,0) at F240 but minions don't spawn until F460. Chose LAST_HIT() which had no targets, causing hero to keep walking forwar | Lesson: Before minion spawn (F460), do not use LAST_HIT(). After reaching lane center, use WAIT() to hold position safely until minions arrive.
+  [SYS4] F240 Summary: Goal: Farm gold by last-hitting minions to build early economy advantage. | 1 EPI + 1 SEM
+  [SYS4] F243 [GOAL] Advance toward enemy side to meet the minion wave for farming.
+  [SYS4] F243 [SEM] just respawned and no minions visible within 10000 units -> MOVE_TO toward own outer tower area, then WAIT for minion wave to arrive.
+  [SYS4] F243 [EPI] Context: Just respawned, walked continuously toward enemy side for ~100 frames. Reached position (9786,8694) near enemy tower area. No enemy visible, but no mi | Lesson: After respawn, MOVE_TO only to a safe position near own outer tower or center, then WAIT for minion wave. Do not walk past center without vision of minions or enemy.
+  [SYS4] F243 Summary: Goal: Advance toward enemy side to meet the minion wave for farming. | 1 EPI + 1 SEM
+  [SYS4] F291 [GOAL] Advance toward the minion wave to secure last-hit gold and establish lane presence.
+  [SYS4] F291 [SEM] enemy in FOW and self position past river center -> RETREAT or MOVE_TO toward own side of river to avoid overextension.
+  [SYS4] F291 [EPI] Context: SELF full HP, enemy FOW. Chose MOVE_TO toward enemy outer tower area for farming, walked 16,000+ units past center. Lost 374 HP to unknown damage by F | Lesson: When enemy is in FOW and you have no vision, do not MOVE_TO past the river center. Instead, use MOVE_TO to the river midpoint (~0,0) then WAIT for the wave to arrive, or use LAST_HIT once minions are 
+  [SYS4] F291 Summary: Goal: Advance toward the minion wave to secure last-hit gold and establish lane presence. | 1 EPI + 1 SEM
+  [SYS4] F294 [GOAL] Reposition to a safe distance from the enemy tower to avoid being caught out.
+  [SYS4] F294 [SEM] just respawned and no minions spawned yet -> MOVE_TO toward own outer tower, then WAIT for minion wave. Do not cross center line.
+  [SYS4] F294 [EPI] Context: After respawn, walked from (-6356,-8084) all the way to (9786,8694) — deep into enemy territory — before realizing overextension. Then chose MOVE_TO b | Lesson: After respawn, MOVE_TO only to a safe position near own outer tower (~-5000,-5000). Do not walk past center until minions spawn. If no enemy or minions visible, WAIT instead of continuing to advance.
+  [SYS4] F294 Summary: Goal: Reposition to a safe distance from the enemy tower to avoid being caught out. | 1 EPI + 1 SEM
+[SYS3_global] full match review...
+  [SYS3_global] [EPI] Context: LLM chose MOVE_TO from base to lane center without any attack or skill usage for the first 240 frames. Enemy remained at full HP (1->1) and was never  | Lesson: At game start, immediately use MOVE_TO toward lane center, but once enemy is visible in range, switch to POKE or ATTACK to establish pressure and gain HP advantage.
+  [SYS3_global] [SEM] game start, no minions spawned (before frame 460) -> MOVE_TO toward lane center, do not call LAST_HIT.
+  [SYS3_global] [SEM] enemy visible in lane before minion wave arrives -> POKE to establish early pressure.
+  [SYS3_global] [EPI] Context: At frame 240, LLM used LAST_HIT() but no minions were in range (position (120,-648) near center, minions not spawned until frame 460). The LLM wasted  | Lesson: Before frame 460 (minion spawn), do not call LAST_HIT. Use MOVE_TO to reach lane center and wait, or POKE enemy if visible.
+  [SYS3_global] Summary: 2 EPI + 2 SEM
+[SYS4_global] global goal alignment...
+  [SYS4_global] [SEM] when minions in range and safe -> LAST_HIT or CLEAR, do not walk past them without attacking.
+  [SYS4_global] [EPI] Context: Entire match was MOVE_TO from base toward enemy. No minions hit, no enemy attacked, no skills used. The LLM walked for 294 frames and never performed  | Lesson: MOVE_TO alone does not progress toward destroying the crystal. Must combine with LAST_HIT, CLEAR, POKE, or ATTACK as soon as minions or enemy are in range.
+  [SYS4_global] Summary: 1 EPI + 1 SEM
+[AUDIT] DB: 0 episodic + 20 semantic
+[AUDIT] Buffer: 23 new candidates
+  [AUDIT] Buffer [SEM] game start frame 0 -> MOVE_TO.step(0,0) with explicit coordinates, not direction-based MOVE_TO.go() | sim=-1.000
+  [AUDIT] Buffer [EPI] At game start, use MOVE_TO.step(0,0) with explicit coordinates rather than direction-based movement to ensure a straight | sim=-1.000
+  [AUDIT] Buffer [SEM] frame < 460 (before minion spawn) -> MOVE_TO toward lane center, then WAIT. Do not use LAST_HIT. | sim=-1.000
+  [AUDIT] Buffer [EPI] Before minions spawn (F460), LAST_HIT() is useless. Use MOVE_TO toward lane center to position, then WAIT or POKE once e | sim=-1.000
+  [AUDIT] Buffer [EPI] When enemy just respawned (HP=1), do not MOVE_TO past center. Instead, LAST_HIT near your own tower to let the wave push | sim=-1.000
+  [AUDIT] Buffer [SEM] self position past center line (x > 0) and enemy FOW -> RETREAT toward own side, do not MOVE_TO deeper into enemy territ | sim=-1.000
+  [AUDIT] Buffer [EPI] When walking deep past center toward enemy tower area, do not assume safe even if enemy is FOW. Enemy can appear from fo | sim=-1.000
+  [AUDIT] Buffer [SEM] LAST_HIT returns "Move" (no minions in range) and position is past center (0,0) -> RETREAT toward own base immediately,  | sim=-1.000
+  [AUDIT] Buffer [EPI] When no minions are visible and LAST_HIT returns "Move", do not continue advancing. Immediately use RETREAT to return to | sim=-1.000
+  [AUDIT] Buffer [SEM] frame_no < 460 and position near lane center -> WAIT to hold position safely until minions spawn | sim=-1.000
+  [AUDIT] Buffer [EPI] Before minion spawn (F460), do not use LAST_HIT(). After reaching lane center, use WAIT() to hold position safely until  | sim=-1.000
+  [AUDIT] Buffer [SEM] just respawned and no minions visible within 10000 units -> MOVE_TO toward own outer tower area, then WAIT for minion wa | sim=-1.000
+  [AUDIT] Buffer [EPI] After respawn, MOVE_TO only to a safe position near own outer tower or center, then WAIT for minion wave. Do not walk pa | sim=-1.000
+  [AUDIT] Buffer [SEM] enemy in FOW and self position past river center -> RETREAT or MOVE_TO toward own side of river to avoid overextension. | sim=-1.000
+  [AUDIT] Buffer [EPI] When enemy is in FOW and you have no vision, do not MOVE_TO past the river center. Instead, use MOVE_TO to the river mid | sim=-1.000
+  [AUDIT] Buffer [SEM] just respawned and no minions spawned yet -> MOVE_TO toward own outer tower, then WAIT for minion wave. Do not cross cen | sim=-1.000
+  [AUDIT] Buffer [EPI] After respawn, MOVE_TO only to a safe position near own outer tower (~-5000,-5000). Do not walk past center until minion | sim=-1.000
+  [AUDIT] Buffer [EPI] At game start, immediately use MOVE_TO toward lane center, but once enemy is visible in range, switch to POKE or ATTACK  | sim=-1.000
+  [AUDIT] Buffer [SEM] game start, no minions spawned (before frame 460) -> MOVE_TO toward lane center, do not call LAST_HIT. | sim=-1.000
+  [AUDIT] Buffer [SEM] enemy visible in lane before minion wave arrives -> POKE to establish early pressure. | sim=-1.000
+  [AUDIT] Buffer [EPI] Before frame 460 (minion spawn), do not call LAST_HIT. Use MOVE_TO to reach lane center and wait, or POKE enemy if visib | sim=-1.000
+  [AUDIT] Buffer [SEM] when minions in range and safe -> LAST_HIT or CLEAR, do not walk past them without attacking. | sim=-1.000
+  [AUDIT] Buffer [EPI] MOVE_TO alone does not progress toward destroying the crystal. Must combine with LAST_HIT, CLEAR, POKE, or ATTACK as soo | sim=-1.000

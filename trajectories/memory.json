@@ -1,0 +1,284 @@
+{
+  "episodic": [],
+  "semantic": [
+    {
+      "rule": "just respawned, no enemies visible -> MOVE_TO toward lane center to farm",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 5,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "minion wave present and safe -> LAST_HIT nearest low-HP minion for gold",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "enemy minions pushing into tower range -> CLEAR to defend tower",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "multiple minions in range -> CLEAR to push wave and gain level advantage",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "enemy in attack range and poke skill ready -> POKE to chip HP",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 1,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "enemy HP below 40% and self HP above 60% -> COMBO_STEP to go for the kill",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "enemy at low HP and fleeing -> CHASE to secure kill",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "enemy in range and self has HP/item advantage -> ATTACK then COMBO_STEP",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 1,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "self behind enemy tower -> RETREAT (tower aggro = death)",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 3,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "self HP below 30% and enemy visible -> RETREAT toward own tower",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 2,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "under tower fire -> RETREAT immediately (tower hits hard)",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 3,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "self HP below 15% or outnumbered -> RETREAT all the way to spawn",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 2,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "self past center of map (x > 0) and enemy missing -> RETREAT (possible gank)",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 2,
+      "contradicted": 2,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "enemy just died (HP <= 0) -> LAST_HIT minions to push wave, then ATTACK tower",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "self at base with full HP -> MOVE_TO toward lane to rejoin fight",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 4,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "no enemy visible and no minions in range -> MOVE_TO forward to apply pressure",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 3,
+      "contradicted": 2,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "self has item completed and enemy in range -> POKE to test fight",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "enemy under their tower pushing wave -> POKE to harass, don't dive",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "after winning trade, enemy recalling -> CLEAR wave fast to deny gold",
+      "hero_ai": null,
+      "hero_bot": null,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "seed_auto"
+      ],
+      "source_event": "SEED",
+      "created_at": 1784729827.7535815,
+      "updated_at": 1784729827.7535815,
+      "active": true
+    },
+    {
+      "rule": "game start, no enemies visible -> MOVE_TO.step(-11240, -11228) to take direct lane path to outer tower",
+      "hero_ai": 169,
+      "hero_bot": 112,
+      "supported": 1,
+      "contradicted": 0,
+      "source_games": [
+        "game_1784730664"
+      ],
+      "created_at": 1784730709.036782,
+      "updated_at": 1784730709.0367823,
+      "active": true
+    }
+  ]
+}

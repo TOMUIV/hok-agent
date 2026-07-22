@@ -1,0 +1,12 @@
+[SYS2] no events detected
+[SYS3] 5 LLM decisions to review...
+  [SYS3] F0:   Lesson: MOVE_TO with coordinates can produce inefficient pathing at game start. Use MOVE_TO with direction="toward_lane" or spec
+  Rule: game start, moving from spawn to lane -> MOVE_TO with direction="toward_lane" or specify intermediate waypoint at (-2500
+  [SYS3] F297:   Lesson: When minions haven't spawned yet (before F460), moving toward lane center is fine, but walking past your own outer tower
+  Rule: before F460, moving toward lane -> MOVE_TO to a position within 5000 units of your own outer tower, not the enemy tower 
+  [SYS3] F300:   Lesson: MOVE_TO with absolute coordinates requires checking current position relative to target. When self is at (15609,7290) an
+  Rule: self position has positive X or Z values above 10000 -> MOVE_TO target must have negative X and Z values to retreat to b
+  [SYS3] F312:   Lesson: When hero is already past center line and deep in enemy territory, MOVE_TO to blue tower is too slow — enemy will catch 
+  Rule: hero position z > 9000 (past center toward enemy) and enemy visible -> RETREAT, not MOVE_TO to a coordinate
+  [SYS3] F315:   Lesson: When SELF position is past center (x>0, z>0), RETREAT() moves toward BLUE spawn at (-50000,-50000) — which means going b
+  Rule: SELF position x > 0 and z > 0 (past center toward RED) -> MOVE_TO toward BLUE tower (-11240,-11228) or BLUE spawn (-5000

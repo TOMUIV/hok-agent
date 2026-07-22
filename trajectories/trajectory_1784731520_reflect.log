@@ -1,0 +1,42 @@
+[SYS2] no events detected
+[SYS3] 5 LLM decisions to review...
+  [SYS3] F0 [SEM] just respawned at base, need to reach lane -> @MOVE_TO.step(outer_tower_x, outer_tower_y) with exact tower coordinates, not vague lane center
+  [SYS3] F0 [EPI] Context: LLM predicted MOVE_TO(lane center) would move directly toward (0,0) to reach minion wave. Actually the movement path curved southward, going from (-32 | Lesson: MOVE_TO with no specific target coordinates can produce inefficient pathing from spawn. Always specify exact coordinates for MOVE_TO from base — use @MOVE_TO.step(-11240, -11228) to go directly to BLU
+  [SYS3] F0 Summary: 1 EPI + 1 SEM
+  [SYS3] F297 [SEM] SELF position x > 10000 or z > 10000 before minion spawn (F460) -> RETREAT toward own outer tower, do not advance further into enemy territory
+  [SYS3] F297 [EPI] Context: LLM predicted MOVE_TO toward lane center (~0,0) would be a standard safe opening. However, the BEFORE frames show SELF was already at (15072,6771) — f | Lesson: Always verify current position against map coordinates before deciding movement. The spawn point is (-50000,-50000), not (15072,6771). When position is already past lane center toward enemy side, MOVE
+  [SYS3] F297 Summary: 1 EPI + 1 SEM
+  [SYS3] F300 [SEM] hero is deep in enemy territory (past center line) and needs to retreat -> RETREAT.step() or DODGE.escape(), not MOVE_TO. MOVE_TO has turn-around delay that costs frames.
+  [SYS3] F300 [EPI] Context: LLM was at POS 15609,7290 (deep in enemy territory, past the center line toward RED side). Enemy was at 3401 HP (full). LLM predicted MOVE_TO toward B | Lesson: MOVE_TO does NOT instantly reverse hero direction. When deep in enemy territory and needing to retreat, you must explicitly call RETREAT or DODGE to override the current movement vector. MOVE_TO(step)
+  [SYS3] F300 Summary: 1 EPI + 1 SEM
+  [SYS3] F312 [SEM] self position is past center of map toward enemy side (z > 5000) before minions spawn (frame < 460) -> MOVE_TO(step toward -11240,-11228) immediately, do not continue forward
+  [SYS3] F312 [SEM] LLM THINK output does not change hero movement -> always use @SKILL_CALL to execute movement changes
+  [SYS3] F312 [EPI] Context: LLM predicted MOVE_TO toward BLUE outer tower (-11240,-11228) would get back to safe position before minions spawn. Reality: LLM had been moving from  | Lesson: When detecting a wrong-direction movement, do not just THINK about reversing — immediately execute MOVE_TO with the correct coordinates. The THINK output does not change hero movement; only @SKILL_CAL
+  [SYS3] F312 Summary: 1 EPI + 2 SEM
+  [SYS3] F315 [SEM] hero moving toward enemy territory for >50 frames -> MOVE_TO with explicit coordinates toward own base, do not rely on RETREAT() to reverse direction instantly
+  [SYS3] F315 [EPI] Context: LLM predicted RETREAT() would move back toward BLUE spawn safely. Actually the hero had been moving TOWARD enemy territory for ~100 frames (from base  | Lesson: Before calling RETREAT(), check the hero's current movement direction. If the hero is already moving toward the enemy, RETREAT() may not instantly reverse direction — the hero may continue moving forw
+  [SYS3] F315 Summary: 1 EPI + 1 SEM
+[SYS4] checking 5 decisions against win goal...
+  [SYS4] F0 [GOAL] Move from spawn toward lane to be in position for the first minion wave at frame 460.
+  [SYS4] F0 [SEM] game just started, no enemies visible -> MOVE_TO toward lane to prepare for first minion wave
+  [SYS4] F0 [EPI] Context: Game start, self at spawn. Chose MOVE_TO toward outer tower to prepare for minion wave. This is correct — no enemies visible, no minions to farm, no c | Lesson: At game start, always MOVE_TO toward lane to establish position before minions arrive.
+  [SYS4] F0 Summary: Goal: Move from spawn toward lane to be in position for the first minion wave at frame 460. | 1 EPI + 1 SEM
+  [SYS4] F297 [GOAL] Move toward lane to be in position for the first minion wave at frame 460.
+  [SYS4] F297 [SEM] early game, moving to lane -> MOVE_TO toward own outer tower, not lane center or enemy side
+  [SYS4] F297 [EPI] Context: Early game, moving to lane. Chose MOVE_TO toward lane center but overshot into enemy territory, risking tower damage. Goal should have been "reach saf | Lesson: When moving to lane early game, MOVE_TO toward your own outer tower position, not the lane center. Stop before crossing the river. Use WAIT if needed.
+  [SYS4] F297 Summary: Goal: Move toward lane to be in position for the first minion wave at frame 460. | 1 EPI + 1 SEM
+  [SYS4] F315 [GOAL] Disengage from deep enemy territory while low on HP to avoid dying and giving the enemy gold and lane control.
+  [SYS4] F315 [EPI] Context: Self walked toward enemy territory for 105 frames without attacking, losing HP from enemy poke. At F315, self is deep in enemy side with lower HP. Cho | Lesson: When you find yourself deep in enemy territory with lower HP, RETREAT immediately to avoid feeding. Do not continue advancing or try to fight at a disadvantage.
+  [SYS4] F315 Summary: Goal: Disengage from deep enemy territory while low on HP to avoid dying and giving the enemy gold and lane control. | 1 EPI + 0 SEM
+[SYS3_global] full match review...
+  [SYS3_global] [EPI] Context: LLM spent the entire match (315 frames) moving from spawn toward the wrong direction (southwest instead of toward lane center). It never changed direc | Lesson: At game start, immediately MOVE_TO toward lane center (approximately 0,0) to meet minions. Do not wander off-map. If HP is dropping and no enemy is visible, check position and correct course toward la
+  [SYS3_global] Summary: 1 EPI + 0 SEM
+[SYS4_global] global goal alignment...
+  [SYS4_global] [SEM] early game, just spawned, no enemies visible -> MOVE_TO toward lane center (not directly toward enemy base)
+  [SYS4_global] [SEM] minions present and safe -> LAST_HIT nearest low-HP minion
+  [SYS4_global] [SEM] enemy in poke range -> POKE to chip HP
+  [SYS4_global] [SEM] enemy low HP -> COMBO_STEP to go for kill
+  [SYS4_global] [EPI] Context: Entire match was a single straight-line walk from spawn to enemy base. No minion interaction, no combat, no gold farming, no tower damage. | Lesson: Walking to the enemy base does not win. Must use LAST_HIT on minions, POKE the enemy hero, and ATTACK/COMBO_STEP to secure kills. Start with MOVE_TO to lane center, then switch to LAST_HIT when minion
+  [SYS4_global] Summary: 1 EPI + 4 SEM
+[AUDIT] DB: 0 episodic + 20 semantic
+[AUDIT] Buffer: 22 new candidates

@@ -1,0 +1,43 @@
+[SYS2] no events detected
+[SYS3] 5 LLM decisions to review...
+  [SYS3] F0 [SEM] game start, no enemies visible -> MOVE_TO.step(-11240, -11228) to take direct lane path to outer tower
+  [SYS3] F0 [EPI] At game start, MOVE_TO should target the direct lane path, not center coordinates. The hero's pathfinding may take suboptimal routes through terrain. Use MOVE_TO with direction= toward lane or step(x,
+  [SYS3] F0:   Lesson: At game start, MOVE_TO should target the direct lane path, not center coordinates. The hero's pathfinding may take subop
+  Rule: game start, no enemies visible -> MOVE_TO.step(-11240, -11228) to take direct lane path to outer tower
+  [SYS3] F240 [SEM] frame < 460 -> MOVE_TO toward lane center, do not use LAST_HIT() (no minions exist yet)
+  [SYS3] F240 [EPI] Do not assume minions are in range just because you've been walking toward lane. Check frame timing: first wave spawns at F460. Before F460, LAST_HIT() is wasted and just moves you forward. Use MOVE_T
+  [SYS3] F240:   Lesson: Do not assume minions are in range just because you've been walking toward lane. Check frame timing: first wave spawns a
+  Rule: frame < 460 -> MOVE_TO toward lane center, do not use LAST_HIT() (no minions exist yet)
+  [SYS3] F243 [SEM] frame < 460 and minions not visible -> MOVE_TO toward lane center or WAIT, do not use LAST_HIT()
+  [SYS3] F243 [EPI] Before frame 460, minions do not exist. LAST_HIT() will always fail and just move forward. Use MOVE_TO toward lane center or WAIT instead. Check frame number against TARGET_BORN_FRAME before calling L
+  [SYS3] F243:   Lesson: Before frame 460, minions do not exist. LAST_HIT() will always fail and just move forward. Use MOVE_TO toward lane cente
+  Rule: frame < 460 and minions not visible -> MOVE_TO toward lane center or WAIT, do not use LAST_HIT()
+  [SYS3] F246 [SEM] frame < 460 and no minions visible -> MOVE_TO toward lane center, not LAST_HIT()
+  [SYS3] F246 [EPI] Do not assume minions are present just because you reached lane center. Check frame number against TARGET_BORN_FRAME=460 before attempting LAST_HIT(). Before frame 460, use MOVE_TO to reach lane posit
+  [SYS3] F246:   Lesson: Do not assume minions are present just because you reached lane center. Check frame number against TARGET_BORN_FRAME=460
+  Rule: frame < 460 and no minions visible -> MOVE_TO toward lane center, not LAST_HIT()
+  [SYS3] F249 [SEM] frame < 460 -> MOVE_TO toward lane center, do not call LAST_HIT()
+  [SYS3] F249 [EPI] Minions do not spawn until frame 460. Before that frame, LAST_HIT() will always return "Move" as there are no minions to target. Do not call LAST_HIT() before frame 460. Instead, MOVE_TO toward lane c
+  [SYS3] F249:   Lesson: Minions do not spawn until frame 460. Before that frame, LAST_HIT() will always return "Move" as there are no minions to
+  Rule: frame < 460 -> MOVE_TO toward lane center, do not call LAST_HIT()
+[SYS4] checking 5 decisions against win goal...
+  [SYS4] F246 [SEM] minions not yet in attack range while advancing to lane -> MOVE_TO toward lane center to close distance
+  [SYS4] F246 [EPI] When minions are not yet in attack range, use MOVE_TO to advance toward lane center. Only switch to LAST_HIT when minion positions confirm they are within range.
+  [SYS4] F246: Goal: ...
+  Lesson: When minions are not yet in attack range, use MOVE_TO to advance toward lane center. Only switch to LAST_HIT when minion
+  Rule: minions not yet in attack range while advancing to lane -> MOVE_TO toward lane center to close distance
+  [SYS4] F249 [SEM] frame < 460 and minions not visible -> MOVE_TO toward outer tower position to prepare for wave
+  [SYS4] F249 [EPI] Verify minion existence before calling LAST_HIT(). Before F460, use MOVE_TO to reach outer tower area. @SKILL_CALL MOVE_TO.step(-11240, -11228)
+  [SYS4] F249: Goal: ...
+  Lesson: Verify minion existence before calling LAST_HIT(). Before F460, use MOVE_TO to reach outer tower area. @SKILL_CALL MOVE_
+  Rule: frame < 460 and minions not visible -> MOVE_TO toward outer tower position to prepare for wave
+[SYS3_global] full match review...
+  [SYS3_global] [SEM] just respawned, no enemies visible, no minions spawned -> MOVE_TO toward lane center to farm
+  [SYS3_global]   Rule: just respawned, no enemies visible, no minions spawned -> MOVE_TO toward lane center to farm
+[SYS4_global] global goal alignment...
+  [SYS4_global] [SEM] minions not yet spawned (frame < 460) -> MOVE_TO toward lane center, do not call LAST_HIT
+  [SYS4_global] [EPI] Before minions spawn (frame 460), use MOVE_TO to reach lane center. Do not call LAST_HIT until minions are visible and in range. @WAIT.hold() or @MOVE_TO.step() until minions arrive.
+  [SYS4_global]   Lesson: Before minions spawn (frame 460), use MOVE_TO to reach lane center. Do not call LAST_HIT until minions are visible and i
+  Rule: minions not yet spawned (frame < 460) -> MOVE_TO toward lane center, do not call LAST_HIT
+[AUDIT] DB: 0 episodic + 19 semantic
+[AUDIT] Buffer: 17 new candidates

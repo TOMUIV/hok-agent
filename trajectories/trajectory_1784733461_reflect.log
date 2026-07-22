@@ -1,0 +1,31 @@
+[SYS2] no events detected
+[SYS3] 5 LLM decisions to review...
+  [SYS3] F0 [EPI] Context: Game just started, both heroes in base. LLM predicted MOVE_TO toward lane center would be "safe path, no enemies". Actually the hero path wandered err | Lesson: When moving to lane from base, use MOVE_TO with explicit coordinates of the outer tower (-11240,-11228) rather than vague "lane center". The pathfinding may be unreliable with ambiguous targets.
+  [SYS3] F0 Summary: 1 EPI + 0 SEM
+  [SYS3] F297 [SEM] first wave approaching, enemy FOW -> MOVE_TO near own outer tower (-11240,-11228) then WAIT to scout, don't cross river before minions meet
+  [SYS3] F297 [EPI] Context: SELF just respawned and moved toward lane center for ~300 frames. At F297, | Lesson: When moving toward lane center early game, don't blindly MOVE_TO the outer
+  [SYS3] F297 Summary: 1 EPI + 1 SEM
+  [SYS3] F300 [SEM] frame < 460 and SELF far from lane center -> WAIT(hold) until closer to minion spawn, don't overextend early
+  [SYS3] F300 [EPI] Context: SELF at full HP (2812) moving from spawn toward lane center. At F300, SELF is at (14839,6666) still far from lane. LLM predicted MOVE_TO(-11240,-11228 | Lesson: Before minion spawn (F460), don't commit to tower position. Instead, use WAIT or MOVE_TO toward lane midpoint to conserve movement. When minions haven't spawned, @WAIT(hold) until closer to F460, then
+  [SYS3] F300 Summary: 1 EPI + 1 SEM
+  [SYS3] F309 [EPI] Context: Self respawned and has been MOVE_TO toward lane center for ~300 frames. At F309, self is at (12985,5415) with 2404 HP, enemy at (unknown,3401 HP). LLM | Lesson: When already committed to moving toward lane from spawn and no enemy visible, continue MOVE_TO toward lane center to farm. Do not reverse direction to tower unless enemy is confirmed pushing or self i
+  [SYS3] F309 Summary: 1 EPI + 0 SEM
+  [SYS3] F312 [SEM] enemy visible within 1500 range and self not yet under tower -> POKE before MOVE_TO, don't walk for free into enemy attack range
+  [SYS3] F312 [EPI] Context: Self had been moving from spawn toward lane center for ~300 frames. At F312, self was at (12857,5768) heading toward blue outer tower (-11240,-11228). | Lesson: When enemy is already visible on the lane with full HP, don't assume MOVE_TO toward tower is safe. The enemy can attack you before you reach tower range. Instead, use POKE first to assert pressure and
+  [SYS3] F312 Summary: 1 EPI + 1 SEM
+[SYS4] checking 5 decisions against win goal...
+  [SYS4] F300 [GOAL] Retreat to a safe position under blue outer tower to prepare for the first minion wave.
+  [SYS4] F300 [SEM] frame < 460 and position x > 0 -> MOVE_TO(-11240,-11228) to wait at safe distance for minion wave.
+  [SYS4] F300 [EPI] Context: SELF walked from spawn all the way past map center to (14839,6666) by F300, with no enemy visible and no minions spawned (spawn at F460). Chose MOVE_T | Lesson: Before minions spawn (pre-F460), do not walk past the center line. Use MOVE_TO toward the blue outer tower area (-11240,-11228) and WAIT there. Overextending early gives no benefit and wastes time rep
+  [SYS4] F300 Summary: Goal: Retreat to a safe position under blue outer tower to prepare for the first minion wave. | 1 EPI + 1 SEM
+[SYS3_global] full match review...
+  [SYS3_global] [SEM] enemy visible in attack range while moving to lane -> POKE to harass before advancing
+  [SYS3_global] [SEM] approaching lane center with no enemy visible -> MOVE_TO toward lane to farm
+  [SYS3_global] [EPI] Context: LLM chose MOVE_TO from spawn toward lane center for 300+ frames without any combat or minion interaction. Enemy appeared at frame 300 with full HP, bu | Lesson: When moving to lane, if enemy becomes visible in attack range, POKE to establish pressure immediately instead of continuing to move passively.
+  [SYS3_global] Summary: 1 EPI + 2 SEM
+[SYS4_global] global goal alignment...
+  [SYS4_global] [SEM] early game when enemy visible and in range -> POKE or ATTACK, don't just MOVE_TO
+  [SYS4_global] [EPI] Context: After reaching lane center near frame 300, enemy LuBan7 visible at 3401 HP. Self continued walking past enemy position without attacking or poking. No | Lesson: When enemy is visible and in range, immediately use POKE or ATTACK to establish pressure. Do not walk past enemy without trading.
+  [SYS4_global] Summary: 1 EPI + 1 SEM
+[AUDIT] DB: 0 episodic + 20 semantic
+[AUDIT] Buffer: 15 new candidates
