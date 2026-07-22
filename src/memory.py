@@ -1,12 +1,56 @@
 ﻿import json, os, re, time, math
 from openai import OpenAI
 
+
+def _summarize_reply(reply, stage):
+    """提取 LLM 回复的关键内容供终端显示。"""
+    if not reply or len(reply) < 20:
+        return "(empty reply)"
+    lines = reply.strip().split("\n")
+    if stage == "SYS4":
+        goal = ""
+        analysis = ""
+        rules = []
+        for i, line in enumerate(lines):
+            if line.strip() == "=== SHORT-TERM GOAL ===" and i + 1 < len(lines):
+                goal = lines[i + 1].strip()[:80]
+            if line.strip() == "=== ALIGNMENT ANALYSIS ===" and i + 1 < len(lines):
+                analysis = lines[i + 1].strip()[:120]
+            if line.strip().startswith("- "):
+                rules.append(line.strip()[2:])
+        parts = []
+        if goal: parts.append(f"Goal: {goal}")
+        if analysis: parts.append(f"→ {analysis}")
+        if rules: parts.append(f"Rule: {'; '.join(rules[:2])}")
+        return " | ".join(parts) if parts else "(no structured output)"
+    if stage in ("SYS3", "SYS3_PREDICT"):
+        rules = [l.strip()[2:] for l in lines if l.strip().startswith("- ")]
+        lessons = [l.strip() for l in lines if l.strip().startswith("Lesson:")]
+        parts = []
+        if lessons: parts.append(f"[EPI] {lessons[0][:120]}")
+        if rules: parts.append(f"[SEM] {'; '.join(rules[:2])}")
+        return " | ".join(parts) if parts else "(no new insights)"
+    if stage in ("SYS3_GLOBAL", "SYS4_GLOBAL", "SYS2"):
+        epi = []
+        sem = []
+        for l in lines:
+            if l.strip().startswith("--- Case:"): epi.append(l.strip())
+            if l.strip().startswith("- "): sem.append(l.strip()[2:])
+        parts = []
+        if epi: parts.append(f"[EPI] {len(epi)} cases")
+        if sem: parts.append(f"[SEM] {'; '.join(sem[:2])}")
+        return " | ".join(parts) if parts else "(no new patterns)"
+    return reply[:200]
+
+
 MEMORY_JSON = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                            "trajectories", "memory.json")
 RETRY_MAX = 3
 
 # ── Semantic Rule Dedup (方案二：结构化字段匹配) ──
-SKILL_NAMES = {'FARM', 'POKE', 'ALL_IN', 'RETREAT', 'DEFEND', 'KITE'}
+from constants import GOLD_SPIKE, POWER_SPIKE
+from skills_concrete import SKILL_REGISTRY as _SKILL_REG
+SKILL_NAMES = set(_SKILL_REG.keys())
 
 ACTION_KEYWORDS = {
     'retreat': ['retreat', 'fall back', 'back off', 'fallback', 'recover', 'fountain'],
@@ -161,9 +205,9 @@ def _extract_key_events(traj_entries):
             events.append({"frame": frame, "type": "kill"})
         if hs is not None and last_hp_self is not None and hs == 0 and last_hp_self > 0:
             events.append({"frame": frame, "type": "death"})
-        if last_gold_self > 0 and gs - last_gold_self >= 200:
+        if last_gold_self > 0 and gs - last_gold_self >= GOLD_SPIKE:
             events.append({"frame": frame, "type": "gold_spike", "delta": gs - last_gold_self})
-        if last_gold_self > 0 and gs - last_gold_self >= 1000:
+        if last_gold_self > 0 and gs - last_gold_self >= POWER_SPIKE:
             events.append({"frame": frame, "type": "power_spike", "delta": gs - last_gold_self})
 
         if hs is not None:
@@ -201,19 +245,35 @@ class MemorySystem:
         self.path = path or MEMORY_JSON
         self.episodic = []
         self.semantic = []
-        self._load()
+        if not self._load():
+            self._auto_seed()
+
+    def _auto_seed(self):
+        from scripts.seed_memory import SEED_SEMANTIC
+        now = time.time()
+        for rule_text in SEED_SEMANTIC:
+            self.semantic.append({
+                "rule": rule_text, "hero_ai": None, "hero_bot": None,
+                "supported": 1, "contradicted": 0,
+                "source_games": ["seed_auto"], "source_event": "SEED",
+                "created_at": now, "updated_at": now, "active": True,
+            })
+        self.save()
+        print(f"[Memory] auto-seeded {len(SEED_SEMANTIC)} SEMANTIC rules", flush=True)
 
     def _load(self):
         if not os.path.isfile(self.path):
-            return
+            return False
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.episodic = data.get("episodic", [])
             self.semantic = data.get("semantic", [])
+            return bool(data.get("semantic"))
         except (json.JSONDecodeError, Exception):
             self.episodic = []
             self.semantic = []
+            return False
 
     def save(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
@@ -358,6 +418,21 @@ class MemorySystem:
         experience = self.retrieve(hero_ai, hero_bot) or ""
         buffer = []  # list of dicts: {type, kind, content, game_id, source}
 
+        # 打开日志文件
+        log_path = reflect_path.replace(".jsonl", "_reflect.log") if reflect_path else None
+        _log_file = None
+        if log_path:
+            try:
+                _log_file = open(log_path, "w", encoding="utf-8")
+            except Exception:
+                _log_file = None
+
+        def _log(msg):
+            print(msg, flush=True)
+            if _log_file:
+                _log_file.write(msg + "\n")
+                _log_file.flush()
+
         def _log_reflect(phase, system_prompt, user_msg, llm_reply, **extra):
             if not reflect_path:
                 return
@@ -371,9 +446,14 @@ class MemorySystem:
             except Exception:
                 pass
 
-        # ── SYS2: Event Analysis ──
+        events = _extract_key_events(traj)
+        if events:
+            ev_strs = [f'{e["type"]}@{e["frame"]}' for e in events]
+            _log(f"[SYS2] events: {', '.join(ev_strs)}")
+        else:
+            _log(f"[SYS2] no events detected")
         sys2_sys = _format_sys_prompt(hero_ai, hero_bot, PROMPT_SYS2_EVENT, experience)
-        for ev in _extract_key_events(traj):
+        for ev in events:
             ev_type = ev["type"]
             ev_frame = ev["frame"]
             bef = self._slice_trajectory(traj, ev_frame - 100, ev_frame)
@@ -384,22 +464,204 @@ class MemorySystem:
             reply = self._retry(sys2_sys, user, llm_client, model)
             _log_reflect("SYS2", sys2_sys, user, reply, event_type=ev_type, event_frame=ev_frame)
             items = _parse_episodic_semantic(reply, game_id, ev_type, ev_frame)
+            for it in items:
+                if it["kind"] == "episodic":
+                    ctx = it.get('context','')[:150]
+                    les = it.get('lesson','')[:200]
+                    _log(f"  [SYS2] {ev_type}@{ev_frame} [EPI] Context: {ctx} | Lesson: {les}")
+                elif it["kind"] == "semantic":
+                    _log(f"  [SYS2] {ev_type}@{ev_frame} [SEM] {it.get('rule','')[:200]}")
             buffer.extend(items)
+            n_epi = sum(1 for it in items if it["kind"] == "episodic")
+            n_sem = sum(1 for it in items if it["kind"] == "semantic")
+            if items: _log(f"  [SYS2] {ev_type}@{ev_frame} Summary: {n_epi} EPI + {n_sem} SEM")
 
-        # ── SYS3: Global Review ──
-        sys3_sys = _format_sys_prompt(hero_ai, hero_bot, PROMPT_SYS3_GLOBAL, experience)
+        # ── SYS3: Prediction Review (NEW, per decision) ──
+        from prompts import PROMPT_SYS3_PREDICT, PROMPT_SYS4_ALIGN, PROMPT_SYS4_GLOBAL
+        llm_frames = [e for e in traj if e.get("phase") == "llm"]
+        n_llm = len(llm_frames)
+        _log(f"[SYS3] {n_llm} LLM decisions to review...")
+        sys3p_sys = _format_sys_prompt(hero_ai, hero_bot, PROMPT_SYS3_PREDICT, experience)
+        for entry in llm_frames:
+            frame = entry["frame"]
+            reply_text = entry.get("llm_reply", "")
+            def _btw(start, end):
+                try:
+                    if end: return reply_text.split(start, 1)[1].split(end, 1)[0].strip()
+                    return reply_text.split(start, 1)[1].strip()
+                except (IndexError, AttributeError): return ""
+            wi1 = _btw("WhatIf 1:", "WhatIf 2") or "(not stated)"
+            decision_action = _btw("Decision:", "=== ACTION") or "(unknown)"
+            bef = self._slice_trajectory(traj, frame - 100, frame)
+            aft = self._slice_trajectory(traj, frame, frame + 100)
+            user = (
+                f"=== DECISION @F{frame} ===\n"
+                f"Chosen: {decision_action[:200]}\n"
+                f"Predicted (WhatIf 1): {wi1[:200]}\n\n"
+                f"=== BEFORE (F{frame-100}~F{frame}) ===\n{bef}\n\n"
+                f"=== AFTER (F{frame}~F{frame+100}) ===\n{aft}"
+            )
+            reply = self._retry(sys3p_sys, user, llm_client, model)
+            _log_reflect("SYS3_PREDICT", sys3p_sys, user, reply, decision_frame=frame)
+            items = _parse_episodic_semantic(reply, game_id, "PREDICTION", frame)
+            for it in items:
+                if it["kind"] == "episodic":
+                    ctx = it.get('context','')[:150]
+                    les = it.get('lesson','')[:200]
+                    _log(f"  [SYS3] F{frame} [EPI] Context: {ctx} | Lesson: {les}")
+                elif it["kind"] == "semantic":
+                    _log(f"  [SYS3] F{frame} [SEM] {it.get('rule','')[:200]}")
+            buffer.extend(items)
+            n_epi = sum(1 for it in items if it["kind"] == "episodic")
+            n_sem = sum(1 for it in items if it["kind"] == "semantic")
+            if items:
+                _log(f"  [SYS3] F{frame} Summary: {n_epi} EPI + {n_sem} SEM")
+
+        # ── SYS4: Goal Alignment (per decision) ──
+        _log(f"[SYS4] checking {n_llm} decisions against win goal...")
+        sys4_sys = _format_sys_prompt(hero_ai, hero_bot, PROMPT_SYS4_ALIGN, experience)
+        for entry in llm_frames:
+            frame = entry["frame"]
+            reply_text = entry.get("llm_reply", "")
+            def _btw(start, end):
+                try:
+                    if end: return reply_text.split(start, 1)[1].split(end, 1)[0].strip()
+                    return reply_text.split(start, 1)[1].strip()
+                except (IndexError, AttributeError): return ""
+            wi1 = _btw("WhatIf 1:", "WhatIf 2") or "(not stated)"
+            wi2 = _btw("WhatIf 2:", "Decision") or "(not stated)"
+            decision_action = _btw("Decision:", "=== ACTION") or "(unknown)"
+            bef = self._slice_trajectory(traj, frame - 100, frame)
+            aft = self._slice_trajectory(traj, frame, frame + 100)
+            user = (
+                f"=== DECISION @F{frame} ===\n"
+                f"Chosen: {decision_action[:200]}\n"
+                f"WhatIf 1: {wi1[:200]}\n"
+                f"WhatIf 2: {wi2[:200]}\n\n"
+                f"=== BEFORE (F{frame-100}~F{frame}) ===\n{bef}\n\n"
+                f"=== AFTER (F{frame}~F{frame+100}) ===\n{aft}"
+            )
+            reply = self._retry(sys4_sys, user, llm_client, model)
+            _log_reflect("SYS4_ALIGN", sys4_sys, user, reply, decision_frame=frame)
+            items = _parse_episodic_semantic(reply, game_id, "ALIGNMENT", frame)
+            goal_text = ""
+            for gline in (reply or "").split("\n"):
+                if gline.strip() == "=== SHORT-TERM GOAL ===" and len(items) > 0:
+                    reply_lines = (reply or "").split("\n")
+                    for gi, g in enumerate(reply_lines):
+                        if g.strip() == "=== SHORT-TERM GOAL ===" and gi + 1 < len(reply_lines):
+                            goal_text = reply_lines[gi + 1].strip()[:120]
+            if goal_text:
+                _log(f"  [SYS4] F{frame} [GOAL] {goal_text}")
+            for it in items:
+                if it["kind"] == "episodic":
+                    ctx = it.get('context','')[:150]
+                    les = it.get('lesson','')[:200]
+                    _log(f"  [SYS4] F{frame} [EPI] Context: {ctx} | Lesson: {les}")
+                elif it["kind"] == "semantic":
+                    _log(f"  [SYS4] F{frame} [SEM] {it.get('rule','')[:200]}")
+            buffer.extend(items)
+            n_epi = sum(1 for it in items if it["kind"] == "episodic")
+            n_sem = sum(1 for it in items if it["kind"] == "semantic")
+            goal_part = f" Goal: {goal_text} |" if goal_text else ""
+            if items:
+                _log(f"  [SYS4] F{frame} Summary:{goal_part} {n_epi} EPI + {n_sem} SEM")
+
+        # ── SYS3_Global: Full match review ──
+        _log(f"[SYS3_global] full match review...")
+        sys3g_sys = _format_sys_prompt(hero_ai, hero_bot, PROMPT_SYS3_GLOBAL, experience)
         full_detail = self._slice_trajectory(traj, 0, len(traj) * 1000)
-        user3 = f"Match: {ai_name} vs {bot_name}, {outcome}, {duration_frames} frames\n\n"
-        user3 += "=== DETAIL (full game) ===\n" + full_detail
-        reply3 = self._retry(sys3_sys, user3, llm_client, model)
-        _log_reflect("SYS3", sys3_sys, user3, reply3)
-        buffer.extend(_parse_episodic_semantic(reply3, game_id, "GLOBAL", 0))
+        user3g = f"Match: {ai_name} vs {bot_name}, {outcome}, {duration_frames} frames\n\n"
+        user3g += "=== DETAIL (full game) ===\n" + full_detail
+        reply3g = self._retry(sys3g_sys, user3g, llm_client, model)
+        _log_reflect("SYS3_GLOBAL", sys3g_sys, user3g, reply3g)
+        items3g = _parse_episodic_semantic(reply3g, game_id, "GLOBAL", 0)
+        for it in items3g:
+            if it["kind"] == "episodic":
+                ctx = it.get('context','')[:150]
+                les = it.get('lesson','')[:200]
+                _log(f"  [SYS3_global] [EPI] Context: {ctx} | Lesson: {les}")
+            elif it["kind"] == "semantic":
+                _log(f"  [SYS3_global] [SEM] {it.get('rule','')[:200]}")
+        buffer.extend(items3g)
+        n_epi = sum(1 for it in items3g if it["kind"] == "episodic")
+        n_sem = sum(1 for it in items3g if it["kind"] == "semantic")
+        if items3g:
+            _log(f"  [SYS3_global] Summary: {n_epi} EPI + {n_sem} SEM")
 
-        # ── AUDIT (always run, re-score both DB and BUFFER) ──
-        kept = []
+        # ── SYS4_Global: Global goal alignment ──
+        _log(f"[SYS4_global] global goal alignment...")
+        sys4g_sys = _format_sys_prompt(hero_ai, hero_bot, PROMPT_SYS4_GLOBAL, experience)
+        user4g = f"Match: {ai_name} vs {bot_name}, {outcome}, {duration_frames} frames\n\n"
+        user4g += "=== DETAIL (full game) ===\n" + full_detail
+        reply4g = self._retry(sys4g_sys, user4g, llm_client, model)
+        _log_reflect("SYS4_GLOBAL", sys4g_sys, user4g, reply4g)
+        items4g = _parse_episodic_semantic(reply4g, game_id, "GLOBAL_ALIGN", 0)
+        for it in items4g:
+            if it["kind"] == "episodic":
+                ctx = it.get('context','')[:150]
+                les = it.get('lesson','')[:200]
+                _log(f"  [SYS4_global] [EPI] Context: {ctx} | Lesson: {les}")
+            elif it["kind"] == "semantic":
+                _log(f"  [SYS4_global] [SEM] {it.get('rule','')[:200]}")
+        buffer.extend(items4g)
+        n_epi = sum(1 for it in items4g if it["kind"] == "episodic")
+        n_sem = sum(1 for it in items4g if it["kind"] == "semantic")
+        if items4g:
+            _log(f"  [SYS4_global] Summary: {n_epi} EPI + {n_sem} SEM")
+
+        # ── Compute embedding similarity (buffer vs DB) & auto-merge near-duplicates ──
+        auto_merged = 0
+        if buffer and (self.episodic or self.semantic):
+            try:
+                from embedding import max_similarity, _item_text
+                db_all = self.episodic + self.semantic
+                filtered = []
+                for bi in buffer:
+                    sim = max_similarity(bi, db_all)
+                    bi["_max_sim"] = round(sim, 3)
+                    if sim > 0.90:
+                        # 极高相似度：自动合并到已有 DB 条目，不送 LLM
+                        for db_item in db_all:
+                            if _item_text(db_item) and _item_text(bi):
+                                if sim > 0.90:
+                                    db_item["supported"] = db_item.get("supported", 0) + 1
+                                    auto_merged += 1
+                                    break
+                    elif sim > 0.80:
+                        filtered.append(bi)  # 边界情况：送 LLM 评分，但 dedup 会用相似度
+                    else:
+                        filtered.append(bi)
+                buffer[:] = filtered
+            except Exception as e:
+                _log(f"  [AUDIT] Embedding similarity unavailable: {e}")
+
+        # ── AUDIT ──
         audit_sys = _format_sys_prompt(hero_ai, hero_bot, PROMPT_AUDIT, experience)
+        _log(f"[AUDIT] DB: {len(self.episodic)} episodic + {len(self.semantic)} semantic")
+        _log(f"[AUDIT] Buffer: {len(buffer)} new candidates" + (f" (+{auto_merged} auto-merged by sim>0.90)" if auto_merged else ""))
+        if buffer:
+            for bi in buffer:
+                sim = bi.get("_max_sim")
+                sim_str = f" | sim={sim:.3f}" if sim is not None else ""
+                if bi["kind"] == "episodic":
+                    _log(f"  [AUDIT] Buffer [EPI] {bi.get('lesson','')[:120]}{sim_str}")
+                else:
+                    _log(f"  [AUDIT] Buffer [SEM] {bi.get('rule','')[:120]}{sim_str}")
+
+        kept = []
         audit_user = f"Match: {ai_name} vs {bot_name}, {outcome}, {duration_frames} frames\n\n"
-        audit_user += "=== BUFFER EXPERIENCE (candidates) ===\n"
+        audit_user += "=== DB EXPERIENCE (existing rules) ===\n"
+        for e in self.episodic:
+            sup = e.get('supported', 0); ctr = e.get('contradicted', 0)
+            audit_user += f"--- Case: {e.get('case_id','')} ({sup}/{sup+ctr}) ---\n  Context: {e.get('context','')}\n  Lesson: {e.get('lesson','')}\n"
+        if not self.episodic:
+            audit_user += "(no episodic memory)\n"
+        for s in self.semantic:
+            audit_user += f"- {s.get('rule','')}\n"
+        if not self.semantic:
+            audit_user += "(no semantic rules)\n"
+        audit_user += "\n=== BUFFER EXPERIENCE (candidates) ===\n"
         if buffer:
             for item in buffer:
                 if item["kind"] == "episodic":
@@ -408,12 +670,18 @@ class MemorySystem:
                     audit_user += f"- {item.get('rule','')}\n"
         else:
             audit_user += "(none)\n"
+
+        # ── Snapshot DB before AUDIT (AUDIT 会原地修改 supported) ──
+        epi_before = {(e.get("case_id",""), e.get("lesson","")): e.get("supported",0) for e in self.episodic}
+        sem_before = {(s.get("rule","")): s.get("supported",0) for s in self.semantic}
+
         reply4 = self._retry(audit_sys, audit_user, llm_client, model)
         _log_reflect("AUDIT", audit_sys, audit_user, reply4)
         if reply4:
             kept = _parse_audit_scores(reply4, buffer, self.episodic, self.semantic)
 
         # ── Merge kept BUFFER items to DB (带过去重) ──
+        added_epi = []; merged_epi = []; added_sem = []; merged_sem = []
         for item in kept:
             if item["kind"] == "episodic":
                 item["hero_ai"] = hero_ai
@@ -423,10 +691,64 @@ class MemorySystem:
                 item["timestamp"] = time.time()
                 if not self._dedup_episodic(item):
                     self.episodic.append(item)
+                    added_epi.append(item)
+                else:
+                    merged_epi.append(item)
             else:
                 self._dedup_semantic(hero_ai, hero_bot, item.get("rule", ""),
                                      hero_ai, hero_bot, outcome, game_id)
         self.save()
+
+        # ── Categorize results ──
+        added = {"episodic": [], "semantic": []}
+        updated = {"episodic": [], "semantic": []}
+        referenced = {"episodic": [], "semantic": []}
+
+        for e in self.episodic:
+            key = (e.get("case_id",""), e.get("lesson",""))
+            bef = epi_before.get(key)
+            if bef is None:
+                added["episodic"].append(e)
+            elif e.get("supported",0) > bef:
+                updated["episodic"].append(e)
+            else:
+                referenced["episodic"].append(e)
+
+        for s in self.semantic:
+            key = s.get("rule","")
+            bef = sem_before.get(key)
+            if bef is None:
+                added["semantic"].append(s)
+            elif s.get("supported",0) > bef:
+                updated["semantic"].append(s)
+            else:
+                referenced["semantic"].append(s)
+
+        def _fmt(items, kind):
+            result = []
+            for e in items:
+                src = e.get("source_event", "UNKNOWN")
+                if kind == "episodic":
+                    result.append({"id": e.get("case_id",""), "text": e.get("lesson","")[:80],
+                                   "score": f"{e.get('supported',0)}/{e.get('supported',0)+e.get('contradicted',0)}",
+                                   "source": src})
+                else:
+                    result.append({"text": e.get("rule","")[:80],
+                                   "score": f"{e.get('supported',0)}/{e.get('supported',0)+e.get('contradicted',0)}",
+                                   "source": src})
+            return result
+
+        return {
+            "added": _fmt(added["episodic"], "episodic") + _fmt(added["semantic"], "semantic"),
+            "updated": _fmt(updated["episodic"], "episodic") + _fmt(updated["semantic"], "semantic"),
+            "referenced": _fmt(referenced["episodic"], "episodic") + _fmt(referenced["semantic"], "semantic"),
+        }
+
+        if _log_file:
+            try:
+                _log_file.close()
+            except Exception:
+                pass
 
     def _retry(self, sys_msg, user_msg, llm_client, model):
         for attempt in range(RETRY_MAX):
@@ -603,7 +925,7 @@ def _parse_episodic_semantic(text, game_id, ev_type, ev_frame):
             current_case["lesson"] = (current_case.get("lesson", "") + " " + ls.split(":", 1)[1].strip()).strip()
         elif ls.startswith("- ") and current_kind in ("ref_sem", "new_sem"):
             item = {"kind": "semantic", "rule": ls[2:].strip(), "game_id": game_id,
-                    "supported": 0, "contradicted": 0}
+                    "supported": 0, "contradicted": 0, "source_event": ev_type}
             if current_kind == "ref_sem":
                 item["reference"] = True
             items.append(item)
@@ -641,18 +963,14 @@ def _parse_audit_scores(text, buffer, db_episodic, db_semantic):
                     if kind == "episodic":
                         for item in db_episodic:
                             if item.get("case_id", "") == key:
-                                if score == 1:
-                                    item["supported"] = item.get("supported", 0) + 1
-                                else:
-                                    item["contradicted"] = item.get("contradicted", 0) + 1
+                                if score == 1: item["supported"] = item.get("supported", 0) + 1
+                                else: item["contradicted"] = item.get("contradicted", 0) + 1
                                 break
                     else:
                         for item in db_semantic:
                             if item.get("rule", "") == key:
-                                if score == 1:
-                                    item["supported"] = item.get("supported", 0) + 1
-                                else:
-                                    item["contradicted"] = item.get("contradicted", 0) + 1
+                                if score == 1: item["supported"] = item.get("supported", 0) + 1
+                                else: item["contradicted"] = item.get("contradicted", 0) + 1
                                 break
                 last_db_match = None
 

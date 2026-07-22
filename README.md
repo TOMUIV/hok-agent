@@ -1,6 +1,6 @@
 # HOK LLM Agent
 
-清华大学 AI实践基石 课程项目 — 用大模型 Agent 玩王者荣耀 1v1。
+LLM Agent plays Honor of Kings 1v1.
 
 ## 快速开始
 

@@ -3,7 +3,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--decisions", type=int, default=5, help="max LLM decisions")
-parser.add_argument("--max-frames", type=int, default=0, help="max env steps (0 = unlimited)")
+parser.add_argument("--max-frames", type=int, default=3000, help="max env steps (-1 = unlimited, default=3000)")
 parser.add_argument("--print-every", type=int, default=1)
 parser.add_argument("--hero-ai", type=int, default=169)
 parser.add_argument("--hero-bot", type=int, default=112)
@@ -54,21 +54,24 @@ import gamecore_data as gc
 from macro_agent import MacroAgent
 import macro_agent
 from memory import MemorySystem
+from constants import BUTTON_NAMES, GOLD_SPIKE, POWER_SPIKE, ZMQ_PORTS
 
 # 清理占用 ZMQ 端口的残留进程
 import subprocess
-try:
-    r = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True, timeout=5)
-    for port in ["35500", "35501"]:
-        if f":{port}" in r.stdout:
-            for line in r.stdout.split("\n"):
-                if f":{port}" in line and "python" in line:
-                    pid = line.strip().split("pid=")[-1].split(",")[0] if "pid=" in line else ""
-                    if pid:
-                        os.system(f"kill -9 {pid} 2>/dev/null")
-                        print(f"[Cleanup] killed PID {pid} holding port {port}", flush=True)
-except Exception:
-    pass
+for port in ZMQ_PORTS:
+    for cmd in [["fuser", "-k", f"{port}/tcp"], ["lsof", "-ti", f":{port}"]]:
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=5)
+            if cmd[0] == "lsof" and r.stdout:
+                for pid in r.stdout.decode().strip().split():
+                    os.system(f"kill -9 {pid} 2>/dev/null")
+                    print(f"[Cleanup] killed PID {pid} on port {port}", flush=True)
+            elif cmd[0] == "fuser":
+                break  # fuser -k kills directly, no output needed
+        except FileNotFoundError:
+            continue
+        except Exception:
+            continue
 
 lib = interface.Interface()
 lib.Init(interface_default_config)
@@ -84,8 +87,6 @@ print(f"Reset OK", flush=True)
 memory_sys = MemorySystem()
 agent = MacroAgent("main", HERO_AI, HERO_BOT, memory_system=memory_sys,
                    max_tokens=MAX_TOKENS, thinking=THINKING)
-
-BUTTON_NAMES = ["None1","None2","Move","Attack","Skill1","Skill2","Skill3","HealSkill","ChosenSkill","Recall","Skill4","EquipSkill"]
 
 def _get_hp(pb, cid):
     for h in getattr(pb, 'hero_list', []):
@@ -112,10 +113,10 @@ def _get_item(pb, cid):
 def _get_tower_hp(pb):
     th = {}
     for o in getattr(pb, 'organ_list', []):
-        cid = getattr(o, 'ConfigID', 0)
+        cid = getattr(o, 'config_id', 0)
         label = {1: "BLUE outer", 2: "RED outer", 42: "BLUE inner", 43: "RED inner", 106: "BLUE crystal", 107: "RED crystal"}.get(cid)
         if label:
-            th[label] = getattr(o, 'Hp', 0)
+            th[label] = getattr(o, 'hp', 0)
     return th
 
 start = time.time()
@@ -130,7 +131,7 @@ prev_gold_self = None
 prev_dmg_hero = prev_dmg_dealt = None
 
 retries = 0
-while not gameover and decisions < MAX_DECISIONS and retries < 50:
+while not gameover and decisions < MAX_DECISIONS and retries < 50 and (MAX_FRAMES < 0 or step < MAX_FRAMES):
     s = info[0]
     pb = s["req_pb"]
     frame = getattr(pb, 'frame_no', 0)
@@ -192,7 +193,7 @@ while not gameover and decisions < MAX_DECISIONS and retries < 50:
         events.append({"frame": frame, "type": "death"})
     if prev_hp_enemy is not None and prev_hp_enemy > 0 and chp_e == 0:
         events.append({"frame": frame, "type": "kill"})
-    if prev_gold_self is not None and cg_s - prev_gold_self >= 200:
+    if prev_gold_self is not None and cg_s - prev_gold_self >= GOLD_SPIKE:
         events.append({"frame": frame, "type": "gold_spike", "delta": cg_s - prev_gold_self})
     prev_hp_self, prev_hp_enemy, prev_gold_self = chp_s, chp_e, cg_s
 
@@ -244,7 +245,7 @@ while not gameover and decisions < MAX_DECISIONS and retries < 50:
         shp = getattr(self_h, 'hp', 0); smhp = getattr(self_h, 'max_hp', 1)
         shp_s = f"{shp}/{smhp}({shp/smhp*100:.0f}%)"
         sg = getattr(self_h, 'money', 0)
-        sp = f"({self_h.location.x:.0f},{self_h.location.y:.0f})" if self_h.location else "(?,?)"
+        sp = f"({self_h.location.x:.0f},{self_h.location.z:.0f})" if self_h.location else "(?,?)"
         eqs = getattr(self_h, 'equipment', None) or []
         eq_names = [gc.get_equip_name(getattr(e, 'config_id', 0)) for e in eqs if getattr(e, 'config_id', 0)]
         si = ", ".join(eq_names) if eq_names else "(none)"
@@ -255,7 +256,7 @@ while not gameover and decisions < MAX_DECISIONS and retries < 50:
         visible = getattr(enemy_h, 'camp_visible', [])
         e_fow = not (any(visible) if visible else True)
         ehp_s = f"FOW" if e_fow else f"{ehp}/{emhp}({ehp/emhp*100:.0f}%)"
-        ep = f"({enemy_h.location.x:.0f},{enemy_h.location.y:.0f})" if enemy_h.location else "(?,?)"
+        ep = f"({enemy_h.location.x:.0f},{enemy_h.location.z:.0f})" if enemy_h.location else "(?,?)"
         eqs_e = getattr(enemy_h, 'equipment', None) or []
         eq_names_e = [gc.get_equip_name(getattr(e, 'config_id', 0)) for e in eqs_e if getattr(e, 'config_id', 0)]
         ei = ", ".join(eq_names_e) if eq_names_e else "(none)"
@@ -263,20 +264,32 @@ while not gameover and decisions < MAX_DECISIONS and retries < 50:
             ehp_s = "FOW"; ep = "(?,?)"; ei = "(?)"; elv = "?"
         # TOWER / MINION from protobuf
         cur_pb = pb if cur_pb is None else cur_pb
-        s_tower = "?"; e_tower = "?"
-        s_minion = "?"; e_minion = "?"
+        s_tower = "(no data)"; e_tower = "(no data)"; s_minion = "0"; e_minion = "0"
+        s_tower_parts = []; e_tower_parts = []
         if cur_pb:
             for o in getattr(cur_pb, 'organ_list', []):
-                cid = getattr(o, 'ConfigID', 0)
-                hp = getattr(o, 'Hp', 0)
-                if cid == 1: s_tower = f"BLUEouter{hp:.0f}"
-                if cid == 2: e_tower = f"REDouter{hp:.0f}"
+                cid = getattr(o, 'config_id', 0)
+                hp = getattr(o, 'hp', 0)
+                lbl = {1: ("OUTER","S"), 2: ("OUTER","E"), 42: ("INNER","S"), 43: ("INNER","E"), 106: ("CRYSTAL","S"), 107: ("CRYSTAL","E")}.get(cid)
+                if lbl:
+                    part = f"{lbl[0]};{hp:.0f}"
+                    if lbl[1] == "S": s_tower_parts.append(part)
+                    else: e_tower_parts.append(part)
+            s_tower = "|".join(s_tower_parts) if s_tower_parts else "(none)"
+            e_tower = "|".join(e_tower_parts) if e_tower_parts else "(none)"
             soldiers = getattr(cur_pb, 'soldier_list', [])
             if soldiers:
-                bc = sum(1 for s in soldiers if getattr(s, 'camp', -1) == 0)
-                rc = sum(1 for s in soldiers if getattr(s, 'camp', -1) == 1)
-                if bc > 0: s_minion = str(bc)
-                if rc > 0: e_minion = str(rc)
+                hc = getattr(self_h, 'camp', None)
+                hc_int = hc.value if hc is not None and hasattr(hc, 'value') else hc
+                friendly = 0; enemy = 0
+                for s in soldiers:
+                    cv = getattr(s, 'camp', None)
+                    if cv is not None:
+                        cv_int = cv.value if hasattr(cv, 'value') else cv
+                        if cv_int == hc_int: friendly += 1
+                        else: enemy += 1
+                s_minion = str(friendly)
+                e_minion = str(enemy)
 
         # skill name
         is_llm = raw not in ("skill_continue", "[fallback]") and not raw.startswith("[LLM Error") and not raw.startswith("[Parse Error")
@@ -310,16 +323,57 @@ try:
     import macro_agent as ma
     traj_path = ma.traj_path if hasattr(ma, 'traj_path') else ""
     outcome = "loss" if d[0] else "win"
+    print(f"[Trajectory] {traj_path}", flush=True)
+    from memory import _extract_key_events, _read_trajectory
+    events = _extract_key_events(_read_trajectory(traj_path))
+    if events:
+        ev_strs = [f'{e["type"]}@{e["frame"]}' for e in events]
+        print(f"[Events] detected: {', '.join(ev_strs)}", flush=True)
+    else:
+        print(f"[Events] none detected", flush=True)
+    r = {}
     if agent.client and traj_path:
-        memory_sys.reflect(HERO_AI, HERO_BOT, outcome, frame, traj_path, agent.client, reflect_path=traj_path)
-    if hasattr(memory_sys, 'debug_summary'):
-        print(f"[Memory] {memory_sys.debug_summary()}", flush=True)
+        r = memory_sys.reflect(HERO_AI, HERO_BOT, outcome, frame, traj_path, agent.client, reflect_path=traj_path) or {}
+    # 按 source 分组打印
+    source_labels = {
+        "KILL": "SYS2(events)", "DEATH": "SYS2(events)", "GOLD_SPIKE": "SYS2(events)",
+        "TOWER_FALL": "SYS2(events)", "POWER_SPIKE": "SYS2(events)", "MINION_WAVE": "SYS2(events)",
+        "PREDICTION": "SYS3(predict)", "ALIGNMENT": "SYS4(align)", "GLOBAL": "SYS3(global)",
+        "GLOBAL_ALIGN": "SYS4(global)", "SEED": "seed(rules)",
+    }
+    by_source = {}
+    for tag, items in [("ADDED", r.get("added",[])), ("UPDATED", r.get("updated",[])), ("REFERENCED", r.get("referenced",[]))]:
+        for e in items:
+            src = e.get("source", "OTHER")
+            by_source.setdefault(src, []).append((tag, e))
+    # 按预定义顺序输出
+    for src in ["SEED","KILL","DEATH","GOLD_SPIKE","TOWER_FALL","POWER_SPIKE","PREDICTION","ALIGNMENT","GLOBAL","GLOBAL_ALIGN","UNKNOWN","OTHER"]:
+        if src not in by_source:
+            continue
+        label = source_labels.get(src, f"SYS?({src})")
+        for tag, e in by_source[src]:
+            id_str = f"[{e.get('id','')}] " if e.get('id') else ""
+            print(f"  {tag} {label}: {id_str}{e['text']} ({e['score']})", flush=True)
+    print(f"[Memory] totals: episodic={len(memory_sys.episodic)} semantic={len(memory_sys.semantic)}", flush=True)
 except Exception as e:
     print(f"[Memory reflect error] {e}", flush=True)
 
 env.close_game()
+mem = memory_sys.debug_summary()
+epi_lines = []
+for e in mem.get("recent_episodic", []):
+    epi_lines.append(f"    [{e['id']}] {e['lesson']}")
+sem_lines = []
+for s in mem.get("top_semantic", []):
+    sem_lines.append(f"    rule: {s['rule']} ({s['supported']}/{s['supported']+s['contradicted']})")
 print(f"\nDONE. {step} env steps, {decisions} decisions in {time.time()-start:.0f}s, outcome={outcome}", flush=True)
-print(f"Memory: {memory_sys.debug_summary()}", flush=True)
+print(f"[Memory] episodic={mem['episodic_count']} semantic={mem['semantic_count']}", flush=True)
+if epi_lines:
+    print(f"[Memory] Recent EPISODIC:", flush=True)
+    for l in epi_lines: print(l, flush=True)
+if sem_lines:
+    print(f"[Memory] Top SEMANTIC:", flush=True)
+    for l in sem_lines: print(l, flush=True)
 
 # 复制最新 ABS 到 /replays/ (D:\TEMP\replay_tool\Replays\)
 try:

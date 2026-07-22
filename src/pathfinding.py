@@ -1,5 +1,4 @@
 import math
-from collections import deque
 
 GOAL_SIZE = 800
 

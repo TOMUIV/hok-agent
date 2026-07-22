@@ -6,10 +6,6 @@ gamecore/gamecore/core_assets/license.dat
 # Game engine binaries (proprietary)
 gamecore/
 
-# Course materials
-课件/
-课件_all_text.txt
-
 # Temp files
 tmp/
 gamecore/gamecore/simulator_output/
@@ -30,13 +26,42 @@ __pycache__/
 # MCP logs
 .playwright-mcp/
 
-# Research papers (read-only references)
+# Research papers
 papers/
 
-# Local-only variant (not for distribution)
+# Local-only variant
 src_v2/
+src_copy/
 
-# Debug scripts (internal use only)
+# Course materials
+课件/
+课件_all_text.txt
+
+# Non-core: documents, media, reports
+report/
+ppt/
+pic/
+vedio/
+bak/
+*.docx
+*.pptx
+*.mp4
+*.png
+*.jpg
+*.jpeg
+*.yml
+
+# Trajectory data (auto-generated)
+trajectories/trajectory_*.jsonl
+trajectories/trajectory_*_reflect.log
+trajectories/memory.json
+trajectories/screenshot*.png
+web_url.txt
+
+# Personal docs (not for distribution)
+PLAN.md
+
+# Debug / internal scripts (not for distribution)
 tests/test_agent.py
 tests/test_final_OK.py
 tests/test_full_flow.py

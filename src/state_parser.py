@@ -15,30 +15,15 @@ def get_skill_cd(h, slot):
         return getattr(sk_list[slot], "cooldown", 0), getattr(sk_list[slot], "cooldown_max", 0)
     return 0, 0
 
-_SUB_FUNCS = {
-    "FARM": [
-        ("last_hit", "last-hit nearest minion"),
-        ("move_to_lane", "move toward lane center"),
-        ("retreat_to_tower", "walk back under tower"),
-    ],
-    "POKE": [
-        ("aim_skill", "cast poke skill at enemy"),
-        ("basic_attack", "basic attack enemy"),
-        ("reposition_back", "step back to safe distance"),
-    ],
-    "ALL_IN": [
-        ("combo_start", "execute skill combo rotation"),
-        ("basic_attack", "basic attack enemy"),
-        ("chase", "move toward enemy"),
-    ],
-}
+def _check_skill_btn(la, btn):
+    return len(la) >= 12 and btn < len(la) and int(la[btn]) == 1
 
 def get_legal_macro_actions(self_h, enemy_h, legal_action, self_hero_id):
     if not self_h or not enemy_h:
         return ["  (no heroes)"]
     available = []
     blocked = []
-    d_enemy = dist(self_h.location.x, self_h.location.y, enemy_h.location.x, enemy_h.location.y)
+    d_enemy = dist(self_h.location.x, self_h.location.z, enemy_h.location.x, enemy_h.location.z)
     hp_pct = self_h.hp / max(self_h.max_hp, 1)
     atk_range = getattr(self_h, "atk_range", 700)
 
@@ -46,82 +31,98 @@ def get_legal_macro_actions(self_h, enemy_h, legal_action, self_hero_id):
     cfg = HERO_SKILL_CONFIG.get(self_hero_id, {})
     skill_ranges = cfg.get("skill_ranges", {})
 
-    for skill_name, sub_funcs in _SUB_FUNCS.items():
-        for func_name, desc in sub_funcs:
-            reason = None
-            ok = True
+    # Each atomic skill with availability check
+    SKILLS = [
+        ("MOVE_TO(x,y)",   None,              None),
+        ("ATTACK(enemy)",  "Attack btn",      3),
+        ("ATTACK(minion)", "Attack+minion",   3),
+        ("POKE()",         f"Skill{cfg.get('poke_skill',1)}", {1:4,2:5,3:6}.get(cfg.get('poke_skill',1))),
+        ("COMBO_STEP()",   None,              None),
+        ("USE_SKILL(slot)","Skill slot",      None),
+        ("KITE()",         "Attack btn",      3),
+        ("DODGE()",        f"Escape skill",   {1:4,2:5,3:6}.get(cfg.get('escape_skill',0)) if cfg.get('escape_skill') else None),
+        ("RETREAT()",      None,              None),
+        ("CHASE()",        None,              None),
+        ("LAST_HIT()",     "Attack+minion",   3),
+        ("CLEAR()",        "Attack+minion",   3),
+        ("RECALL()",       "Recall btn",      9),
+        ("WAIT()",         None,              None),
+    ]
 
-            if skill_name == "FARM":
-                if func_name == "last_hit":
-                    if len(legal_action) >= 12 and int(legal_action[3]) != 1:
-                        ok = False; reason = "Attack not available"
-                elif func_name in ("retreat_to_tower", "move_to_lane"):
-                    pass
+    for name, label, btn in SKILLS:
+        reason = None
+        ok = True
 
-            elif skill_name == "POKE":
-                if func_name == "aim_skill":
-                    pk = cfg.get("poke_skill", 1)
-                    btn = {1: 4, 2: 5, 3: 6}[pk]
-                    sr = skill_ranges.get(pk, 700)
-                    if len(legal_action) >= 12 and int(legal_action[btn]) != 1:
-                        btn_name = BTN_REVERSE.get(btn, f"btn{btn}")
-                        ok = False; reason = f"Skill{pk}({btn_name}) not available"
-                    elif d_enemy > sr:
-                        ok = False; reason = f"enemy out of range ({d_enemy:.0f})"
-                    else:
-                        cd, _ = get_skill_cd(self_h, pk - 1)
-                        if cd > 0:
-                            ok = False; reason = f"Skill{pk} on cooldown ({cd/1000:.1f}s)"
-                elif func_name == "basic_attack":
-                    if len(legal_action) >= 12 and int(legal_action[3]) != 1:
-                        ok = False; reason = "Attack not available"
-                    elif d_enemy > atk_range:
-                        ok = False; reason = f"enemy out of range ({d_enemy:.0f})"
-                elif func_name == "reposition_back":
-                    pass
-
-            elif skill_name == "ALL_IN":
-                if func_name == "combo_start":
-                    prio = cfg.get("combo_priority", [3, 2, 1])
-                    any_ok = False
-                    for sn in prio:
-                        btn = {1: 4, 2: 5, 3: 6}[sn]
-                        sr = skill_ranges.get(sn, 700)
-                        if int(legal_action[btn]) == 1 and d_enemy < sr:
-                            cd, _ = get_skill_cd(self_h, sn - 1)
-                            if cd == 0:
-                                any_ok = True
-                                break
-                    if not any_ok:
-                        ok = False; reason = "no combo skill in range or off cooldown"
-                    if hp_pct < 0.3:
-                        ok = False; reason = f"HP too low ({hp_pct*100:.0f}%)"
-                elif func_name == "basic_attack":
-                    if len(legal_action) >= 12 and int(legal_action[3]) != 1:
-                        ok = False; reason = "Attack not available"
-                    elif d_enemy > atk_range:
-                        ok = False; reason = f"enemy out of range ({d_enemy:.0f})"
-                elif func_name == "chase":
-                    if d_enemy > atk_range * 3:
-                        ok = False; reason = f"enemy too far ({d_enemy:.0f})"
-
-            label = f"{skill_name}.{func_name}()"
-            if ok:
-                available.append(label)
+        if name == "POKE()":
+            pk = cfg.get("poke_skill", 1)
+            pbtn = {1: 4, 2: 5, 3: 6}[pk]
+            sr = skill_ranges.get(pk, 700)
+            if not _check_skill_btn(legal_action, pbtn):
+                ok = False; reason = f"Skill{pk} not available"
+            elif d_enemy > sr:
+                ok = False; reason = f"enemy out of range ({d_enemy:.0f})"
             else:
-                blocked.append(f"  {label}: {reason}")
+                cd, _ = get_skill_cd(self_h, pk - 1)
+                if cd > 0:
+                    ok = False; reason = f"Skill{pk} on CD ({cd/1000:.1f}s)"
 
-    lines = []
-    if available:
-        lines.append("  AVAILABLE:")
-        for a in available:
-            lines.append(f"    {a}")
-    if blocked:
-        lines.append("  BLOCKED:")
-        lines.extend(blocked)
-    if not available and not blocked:
-        lines.append("  (none)")
-    return lines
+        elif name == "COMBO_STEP()":
+            prio = cfg.get("combo_priority", [3, 2, 1])
+            any_ok = False
+            for sn in prio:
+                sbtn = {1: 4, 2: 5, 3: 6}[sn]
+                sr = skill_ranges.get(sn, 700)
+                if _check_skill_btn(legal_action, sbtn) and d_enemy < sr:
+                    cd, _ = get_skill_cd(self_h, sn - 1)
+                    if cd == 0:
+                        any_ok = True; break
+            if not any_ok:
+                ok = False; reason = "no combo skill in range or off CD"
+
+        elif name in ("USE_SKILL(slot)",):
+            pass  # generic, depends on slot param
+
+        elif name in ("DODGE()",):
+            esc = cfg.get("escape_skill", 0)
+            if not esc:
+                ok = False; reason = "no escape skill"
+            else:
+                ebtn = {1: 4, 2: 5, 3: 6}[esc]
+                if not _check_skill_btn(legal_action, ebtn):
+                    ok = False; reason = f"Escape skill S{esc} not available"
+
+        elif btn is not None:
+            if name in ("ATTACK(enemy)",):
+                if not _check_skill_btn(legal_action, 3):
+                    ok = False; reason = "Attack not available"
+            elif name in ("ATTACK(minion)", "LAST_HIT()", "CLEAR()"):
+                if not _check_skill_btn(legal_action, 3):
+                    ok = False; reason = "Attack not available"
+                else:
+                    off = 12 + 16 * 4
+                    row = off + 3 * 8
+                    if row + 8 <= len(legal_action) and legal_action[row + 2] != 1.0:
+                        ok = False; reason = "minion target unavailable"
+            elif name == "KITE()":
+                if not _check_skill_btn(legal_action, 3):
+                    ok = False; reason = "Attack not available"
+            elif name == "RECALL()":
+                if not _check_skill_btn(legal_action, 9):
+                    ok = False; reason = "Recall button unavailable"
+
+        if ok:
+            available.append(f"  {name}")
+        else:
+            blocked.append(f"  {name} — {reason}")
+
+    if not available:
+        available.append("  (none)")
+
+    result = ["AVAILABLE:"]
+    result.extend(available)
+    result.append("BLOCKED:")
+    result.extend(blocked)
+    return result
 
 def parse_state(info, self_hero_id=None):
     s = info if isinstance(info, dict) else info[0]
@@ -179,7 +180,7 @@ def parse_state(info, self_hero_id=None):
         ep = f"{getattr(self_h,'ep',0)}/{getattr(self_h,'max_ep',0)}"
         gold = getattr(self_h, 'money', 0)
         px, py, pz = get_pos(self_h)
-        pos_str = f"({px:.0f},{py:.0f})" if px else "(?,?)"
+        pos_str = f"({px:.0f},{pz:.0f})" if px else "(?,?)"
         pa = getattr(self_h, 'phy_atk', 0)
         ma = getattr(self_h, 'mgc_atk', 0)
         pd = getattr(self_h, 'phy_def', 0)
@@ -218,7 +219,7 @@ def parse_state(info, self_hero_id=None):
         ep = getattr(enemy_h, 'ep', 0)
         gold = getattr(enemy_h, 'money', 0)
         px, py, pz = get_pos(enemy_h)
-        pos_str = f"({px:.0f},{py:.0f})" if px else "(?,?)"
+        pos_str = f"({px:.0f},{pz:.0f})" if px else "(?,?)"
         pa = getattr(enemy_h, 'phy_atk', 0)
         ma = getattr(enemy_h, 'mgc_atk', 0)
         pd = getattr(enemy_h, 'phy_def', 0)
@@ -236,10 +237,10 @@ def parse_state(info, self_hero_id=None):
     blue_organs = {"crystal": None, "inner": None, "outer": None}
     red_organs = {"crystal": None, "inner": None, "outer": None}
     for o in organs:
-        camp = getattr(o, 'Camp', -1)
-        sub = getattr(o, 'SubType', 0)
-        hp = getattr(o, 'Hp', 0)
-        mhp = getattr(o, 'MaxHp', 0)
+        camp = getattr(o, 'camp', -1)
+        sub = getattr(o, 'sub_type', 0)
+        hp = getattr(o, 'hp', 0)
+        mhp = getattr(o, 'max_hp', 0)
         ox = getattr(o, 'x', None)
         oz = getattr(o, 'z', None)
         info_str = f"HP:{hp}/{mhp}"
@@ -301,7 +302,7 @@ def parse_state(info, self_hero_id=None):
     sp = get_pos(self_h) if self_h else (None, None, None)
     ep = get_pos(enemy_h) if enemy_h else (None, None, None)
     if sp[0] is not None and ep[0] is not None:
-        d = dist(sp[0], sp[1], ep[0], ep[1])
+        d = dist(sp[0], sp[2], ep[0], ep[2])
         lines.append(f"  To enemy: {d:.0f}")
     else:
         lines.append("  To enemy: ?")
@@ -309,12 +310,12 @@ def parse_state(info, self_hero_id=None):
     # distance to nearest enemy tower
     min_tower_d = 1e9
     for o in organs:
-        camp = getattr(o, 'Camp', -1)
+        camp = getattr(o, 'camp', -1)
         if camp == 1 and sp[0] is not None:
             ox = getattr(o, 'x', None)
             oz = getattr(o, 'z', None)
             if ox is not None and oz is not None:
-                d = dist(sp[0], sp[1], ox, oz)
+                d = dist(sp[0], sp[2], ox, oz)
                 if d < min_tower_d:
                     min_tower_d = d
     if min_tower_d < 1e8:
@@ -327,7 +328,7 @@ def parse_state(info, self_hero_id=None):
     for sol in soldiers:
         loc = getattr(sol, 'location', None)
         if loc and hasattr(loc, 'x') and sp[0] is not None:
-            d = dist(sp[0], sp[1], loc.x, loc.z)
+            d = dist(sp[0], sp[2], loc.x, loc.z)
             if d < min_soldier_d:
                 min_soldier_d = d
     if min_soldier_d < 1e8:
@@ -386,7 +387,7 @@ def compress_state(pb, self_hero_id=None):
         ep = getattr(self_h, 'ep', 0)
         g = getattr(self_h, 'money', 0)
         loc = getattr(self_h, 'location', None)
-        pos = f"({loc.x:.0f},{loc.y:.0f})" if loc and hasattr(loc, 'x') else "(?,?)"
+        pos = f"({loc.x:.0f},{loc.z:.0f})" if loc and hasattr(loc, 'x') else "(?,?)"
         pct = hp / mhp * 100 if mhp > 0 else 0
         lines.append(f"SELF: {hp}/{mhp}({pct:.0f}%) EP:{ep} G:{g} @{pos}")
     if enemy_h:
@@ -395,16 +396,16 @@ def compress_state(pb, self_hero_id=None):
         visible = getattr(enemy_h, 'camp_visible', [])
         g = getattr(enemy_h, 'money', 0)
         loc = getattr(enemy_h, 'location', None)
-        pos = f"({loc.x:.0f},{loc.y:.0f})" if loc and hasattr(loc, 'x') else "(?,?)"
+        pos = f"({loc.x:.0f},{loc.z:.0f})" if loc and hasattr(loc, 'x') else "(?,?)"
         is_visible = any(visible) if visible else True
         hp_s = f"{hp}/{mhp}" if is_visible else "FOW"
         lines.append(f"ENEMY: {hp_s} G:{g} @{pos}")
     organs = list(getattr(pb, 'organ_list', []))
     for o in organs:
-        camp = getattr(o, 'Camp', -1)
-        sub = getattr(o, 'SubType', 0)
-        hp = getattr(o, 'Hp', 0)
-        mhp = getattr(o, 'MaxHp', 0)
+        camp = getattr(o, 'camp', -1)
+        sub = getattr(o, 'sub_type', 0)
+        hp = getattr(o, 'hp', 0)
+        mhp = getattr(o, 'max_hp', 0)
         if sub == 21:
             side = "BLUE" if camp == 0 else "RED"
             lines.append(f"{side} twr: {hp}/{mhp}")

@@ -10,6 +10,13 @@ class Skill:
     description = ""
     when = ""
     until = ""
+    no_interrupt = False  # damage interrupts this skill
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        from skill_config import CONTINUOUS_SKILLS
+        if cls.name in CONTINUOUS_SKILLS:
+            cls.no_interrupt = True
 
     def get_doc(self):
         lines = [

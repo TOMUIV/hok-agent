@@ -7,10 +7,10 @@ from skill_base import SKILL_REGISTRY
 from memory import MemorySystem
 from prompts import PROMPT_SYS1_PROTOCOL, EXPERIENCE_WARNING, build_full_prompt
 import gamecore_data as gc
-from trajectory import TRAJECTORY_DIR
+from constants import TRAJECTORY_DIR
 
 FRAME_BUFFER_MAX = 2000
-BTN_NAMES = ["None1","None2","Move","Attack","Skill1","Skill2","Skill3","HealSkill","ChosenSkill","Recall","Skill4","EquipSkill"]
+from constants import BUTTON_NAMES as BTN_NAMES
 traj_file = None
 traj_path = os.path.join(TRAJECTORY_DIR, f"trajectory_{int(time.time())}.jsonl")
 
@@ -60,11 +60,12 @@ class MacroAgent:
             return False
         under_tower = getattr(h, 'is_hero_under_tower_atk', False)
         if under_tower:
+            self._last_hp = getattr(h, 'hp', 0)
             return True
         hp = getattr(h, 'hp', 0)
-        if self._last_hp and self._last_hp - hp > 50:
-            return True
-        return False
+        damaged = bool(self._last_hp and self._last_hp - hp > 50)
+        self._last_hp = hp
+        return damaged
 
     def push_frame(self, frame, action_name, action_tuple, delta, events, llm_data=None, combat=None):
         """Record one frame into frame_buffer.
@@ -101,26 +102,6 @@ class MacroAgent:
                 traj_path, self.client,
                 reflect_path=reflect_path,
             )
-
-    def _get_hero_data(self, pb, cid):
-        for h in getattr(pb, 'hero_list', []):
-            if getattr(h, 'config_id', 0) == cid:
-                loc = getattr(h, 'location', None)
-                px = loc.x if loc and hasattr(loc, 'x') else None
-                py = loc.y if loc and hasattr(loc, 'y') else None
-                equip_list = getattr(h, 'equipment', None) or []
-                eq_names = []
-                for eq in equip_list:
-                    eq_id = getattr(eq, 'config_id', 0)
-                    if eq_id:
-                        eq_names.append(gc.get_equip_name(eq_id))
-                return {
-                    "hp": getattr(h, 'hp', 0), "max_hp": getattr(h, 'max_hp', 1),
-                    "gold": getattr(h, 'money', 0), "level": getattr(h, 'level', 1),
-                    "pos": (px, py) if px is not None else None,
-                    "item": ", ".join(eq_names) if eq_names else "(none)",
-                }
-        return None
 
     def _parse_prediction(self, think_text):
         if not think_text:
@@ -163,7 +144,7 @@ class MacroAgent:
         g_self_start = g_self_end = g_enemy_start = g_enemy_end = 0
         kills = deaths = 0
         skill_count = {}
-        dmg_taken_hero = 0; dmg_taken_tower = 0; dmg_dealt = 0; under_tower_cnt = 0
+        dmg_taken_hero = 0; dmg_taken_total_hp = 0; dmg_taken_tower = 0; dmg_dealt = 0; under_tower_cnt = 0
         for idx, f in enumerate(buf):
             d = f.get("delta", {})
             if d.get("self_pos"):
@@ -183,6 +164,7 @@ class MacroAgent:
             c = f.get("combat", {})
             dmg_taken_hero += c.get("dmg_taken_hero", 0)
             dmg_dealt += c.get("dmg_dealt_hero", 0)
+            dmg_taken_total_hp += max(0, -c.get("dmg_taken_hp", 0))
             if c.get("under_tower_fire"):
                 under_tower_cnt += 1
                 dmg_taken_tower += max(0, -c.get("dmg_taken_hp", 0) - c.get("dmg_taken_hero", 0))
@@ -200,7 +182,8 @@ class MacroAgent:
             return "\n".join(lines)
 
         trend_self = _side_block("SELF", pos_self, g_self_start, g_self_end, kills, deaths, skill_count)
-        trend_combat = f"--- SELF_COMBAT ---\n  DMG_TAKEN: {dmg_taken_hero+dmg_taken_tower} (TOWER:{dmg_taken_tower} HERO:{dmg_taken_hero} MINION:{max(0,dmg_taken_hero-0)})\n  DMG_DEALT: {dmg_dealt}\n  UNDER_TOWER_FIRE: {'YES' if under_tower_cnt>0 else 'NO'}"
+        dmg_other = max(0, dmg_taken_total_hp - dmg_taken_hero - dmg_taken_tower)
+        trend_combat = f"--- SELF_COMBAT ---\n  DMG_TAKEN: {dmg_taken_total_hp} (TOWER:{dmg_taken_tower} HERO:{dmg_taken_hero} OTHER:{dmg_other:.0f})\n  DMG_DEALT: {dmg_dealt}\n  UNDER_TOWER_FIRE: {'YES' if under_tower_cnt>0 else 'NO'}"
         trend_enemy = _side_block("ENEMY", pos_enemy, g_enemy_start, g_enemy_end, deaths, kills, {})
         trend_text = trend_self + "\n\n" + trend_combat + "\n\n" + trend_enemy
         sections = [f"=== TRENDS (last {len(buf)} frames, {llm_frames} LLM calls) ===" + "\n" + trend_text]
@@ -331,7 +314,9 @@ class MacroAgent:
         error_info = ""
         try:
             kwargs = dict(model=self.model, messages=messages,
-                          temperature=0.7, max_tokens=self.max_tokens, top_p=1)
+                          temperature=float(os.environ.get("LLM_TEMPERATURE", "0.7")),
+                          max_tokens=self.max_tokens,
+                          top_p=float(os.environ.get("LLM_TOP_P", "1.0")))
             if not self.thinking:
                 kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
             resp = self.client.chat.completions.create(**kwargs)
@@ -353,8 +338,10 @@ class MacroAgent:
 
         results = self.executor.process_batch(s, reply)
         if not results:
-            error_info = "[Parse Error] no valid @SKILL_CALL in === ACTION === section"
+            snippet = reply[:200].replace("\n", "\\n")
+            error_info = f"[Parse Error] no valid @SKILL_CALL in ACTION. LLM reply: {snippet}"
             print(error_info, flush=True)
+            print(f"  Full reply:\n{reply[:500]}", flush=True)
             self._last_llm_entry = {"error": error_info, "system_prompt": self.system_prompt,
                                      "user_msg": user_msg, "llm_reply": reply, "parsed_results": ""}
             self.executor._concrete_skill = None
@@ -363,7 +350,7 @@ class MacroAgent:
         self.last_results_full = []
         for r in results:
             if r["type"] == "skill_call":
-                self._last_skill_name = f"{r['skill']}.{r['func']}()"
+                self._last_skill_name = f"{r['skill']}()"
                 result = r.get("result", {})
                 if isinstance(result, dict):
                     lines = [f"@SKILL_CALL {self._last_skill_name}"]
@@ -411,8 +398,8 @@ class MacroAgent:
                         state_changes.append(f"  {tag}: {' | '.join(parts)}")
             def tower_hp(pb, cid):
                 for o in getattr(pb, 'organ_list', []):
-                    if getattr(o, 'ConfigID', 0) == cid:
-                        return getattr(o, 'Hp', 0), getattr(o, 'MaxHp', 0)
+                    if getattr(o, 'config_id', 0) == cid:
+                        return getattr(o, 'hp', 0), getattr(o, 'max_hp', 0)
                 return None, None
             for label, ocid in [("RED outer", 2), ("RED crystal", 107), ("BLUE outer", 1), ("BLUE crystal", 106)]:
                 chp, cmhp = tower_hp(pb_curr, ocid)

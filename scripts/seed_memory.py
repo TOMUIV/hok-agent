@@ -1,23 +1,33 @@
-"""初始经验种子：状态机决策规则"""
+"""初始经验种子：原子技能规则"""
 import json, os, time
 
-# 完全对应 run_full_battle.py StateMachine.decide() 的19条规则
 SEED_SEMANTIC = [
-    # 按优先级排列，和状态机一致
-    "HP below 1% (just respawned) -> call FARM to move to lane",
-    "self_x within 2000 of spawn and HP below 60% -> call RETREAT to recover at fountain",
-    "HP below 30% -> call RETREAT to fall back",
-    "enemy HP <= 0 (enemy just died) -> call FARM to push lane and last hit minions",
-    "2 or more enemy minions within 5000 range -> call DEFEND to clear wave first",
-    "self_x past danger_x (enemy tower range) -> call RETREAT to avoid tower aggro",
-    "self_x past center of map (x > 0) -> call POKE to harass enemy from mid range",
-    "enemy_x past danger_x - 1000 and self_x > -20000 -> call POKE to pressure enemy near tower",
-    "HP below 35% and enemy has HP advantage -> call RETREAT to avoid being killed",
-    "distance to enemy > 8000 -> call FARM to move forward toward lane",
-    "distance to enemy between 3500 and 8000 -> call POKE to approach and harass",
-    "HP above 60% and enemy in range -> call ALL_IN to commit to the fight",
-    "default when none of above apply -> call KITE to reposition safely",
-    "after calling RETREAT, stay in RETREAT until reaching spawn area",
+    # === 发育推线 ===
+    "just respawned, no enemies visible -> MOVE_TO toward lane center to farm",
+    "minion wave present and safe -> LAST_HIT nearest low-HP minion for gold",
+    "enemy minions pushing into tower range -> CLEAR to defend tower",
+    "multiple minions in range -> CLEAR to push wave and gain level advantage",
+
+    # === 消耗与击杀 ===
+    "enemy in attack range and poke skill ready -> POKE to chip HP",
+    "enemy HP below 40% and self HP above 60% -> COMBO_STEP to go for the kill",
+    "enemy at low HP and fleeing -> CHASE to secure kill",
+    "enemy in range and self has HP/item advantage -> ATTACK then COMBO_STEP",
+    "self behind enemy tower -> RETREAT (tower aggro = death)",
+
+    # === 防御与撤退 ===
+    "self HP below 30% and enemy visible -> RETREAT toward own tower",
+    "under tower fire -> RETREAT immediately (tower hits hard)",
+    "self HP below 15% or outnumbered -> RETREAT all the way to spawn",
+    "self past center of map (x > 0) and enemy missing -> RETREAT (possible gank)",
+
+    # === 走位与节奏 ===
+    "enemy just died (HP <= 0) -> LAST_HIT minions to push wave, then ATTACK tower",
+    "self at base with full HP -> MOVE_TO toward lane to rejoin fight",
+    "no enemy visible and no minions in range -> MOVE_TO forward to apply pressure",
+    "self has item completed and enemy in range -> POKE to test fight",
+    "enemy under their tower pushing wave -> POKE to harass, don't dive",
+    "after winning trade, enemy recalling -> CLEAR wave fast to deny gold",
 ]
 
 SEED_EPISODIC = []
