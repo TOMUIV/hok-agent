@@ -271,8 +271,8 @@ def parse_state(info, self_hero_id=None):
     lines.append("--- MINIONS ---")
     if soldiers:
         s_count = len(soldiers)
-        s = soldiers[0]
-        camp = getattr(s, 'camp', -1)
+        s0 = soldiers[0]
+        camp = getattr(s0, 'camp', -1)
         side = "BLUE" if camp == 0 else ("RED" if camp == 1 else "?")
         lines.append(f"  {s_count} visible ({side} side)")
     else:
